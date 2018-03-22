@@ -49,5 +49,5 @@ docker build -t gochain/rpc-proxy .
 3. Run docker image
 
 ```
-docker run --rm -it -p 8545:8545 gochain/rpc-proxy -url http://SOME_IP:8545 -allow "eth_*,net_*" -rpm 100
+docker run --rm -it -p 8545:8545 gochain/rpc-proxy rpc-proxy -url http://SOME_IP:8545 -allow "eth_*,net_*" -rpm 100
 ```

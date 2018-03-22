@@ -12,27 +12,38 @@ import (
 type Prox struct {
 	target *url.URL
 	proxy  *httputil.ReverseProxy
+	myTransport
 }
 
-func NewProxy(target string) *Prox {
+func NewProxy(target string, m matcher) *Prox {
 	url, _ := url.Parse(target)
 
-	return &Prox{target: url, proxy: httputil.NewSingleHostReverseProxy(url)}
+	p := &Prox{target: url, proxy: httputil.NewSingleHostReverseProxy(url)}
+	p.stats = make(map[string]MonitoringPath)
+	p.matcher = m
+	p.proxy.Transport = &p.myTransport
+	return p
 }
 
 func (p *Prox) handle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-rpc-proxy", "rpc-proxy")
-	p.proxy.Transport = &myTransport{}
-
 	p.proxy.ServeHTTP(w, r)
+}
 
+func (p *Prox) ServerStatus(w http.ResponseWriter, r *http.Request) {
+	stats, err := p.getStats()
+	if err != nil {
+		http.Error(w, "failed to get stats", http.StatusInternalServerError)
+		log.Println("Failed to get server stats:", err)
+	} else {
+		w.Write(stats)
+	}
 }
 
 var port *string
 var redirecturl *string
 var allowedPathes *string
 var requestsPerMinuteLimit *int
-var globalMap = make(map[string]MonitoringPath)
 
 func main() {
 	const (
@@ -60,21 +71,16 @@ func main() {
 	log.Println("requests from IP per minute limited to :", *requestsPerMinuteLimit)
 
 	// filling matcher rules
-	err := AddMatcherRules(strings.Split(*allowedPathes, ","))
+	rules, err := newMatcher(strings.Split(*allowedPathes, ","))
 	if err != nil {
 		log.Println("Cannot parse list of allowed pathes", err)
 	}
 	// proxy
-	proxy := NewProxy(*redirecturl)
+	proxy := NewProxy(*redirecturl, rules)
 
-	http.HandleFunc("/rpc-proxy-server-status", ServerStatus)
+	http.HandleFunc("/rpc-proxy-server-status", proxy.ServerStatus)
 
 	// server redirection
 	http.HandleFunc("/", proxy.handle)
 	log.Fatal(http.ListenAndServe(":"+*port, nil))
-}
-
-func ServerStatus(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte(getStats()))
-	return
 }

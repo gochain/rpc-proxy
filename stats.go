@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"log"
 	"time"
 )
 
@@ -13,27 +12,31 @@ type MonitoringPath struct {
 	AverageTime   float64
 }
 
-func updateStats(parsedRequest ModifiedRequest, elapsed time.Duration) {
+func (t *myTransport) updateStats(parsedRequest ModifiedRequest, elapsed time.Duration) {
 	key := parsedRequest.RemoteAddr + "-" + parsedRequest.Path
-	if val, ok := globalMap[key]; ok {
+	t.statsMu.Lock()
+	defer t.statsMu.Unlock()
+	if val, ok := t.stats[key]; ok {
 		val.Count = val.Count + 1
 		val.TotalDuration += elapsed.Seconds()
 		val.AverageTime = val.TotalDuration / val.Count
-		globalMap[key] = val
+		t.stats[key] = val
 	} else {
 		var m MonitoringPath
 		m.Path = parsedRequest.Path
 		m.Count = 1
 		m.TotalDuration = elapsed.Seconds()
 		m.AverageTime = m.TotalDuration / m.Count
-		globalMap[key] = m
+		t.stats[key] = m
 	}
 }
 
-func getStats() string {
-	b, err := json.MarshalIndent(globalMap, "", "  ")
+func (t *myTransport) getStats() ([]byte, error) {
+	t.statsMu.RLock()
+	defer t.statsMu.RUnlock()
+	b, err := json.MarshalIndent(t.stats, "", "  ")
 	if err != nil {
-		log.Println("error:", err)
+		return nil, err
 	}
-	return string(b)
+	return b, nil
 }

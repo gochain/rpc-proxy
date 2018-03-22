@@ -33,21 +33,22 @@ When you run the rpc-proxy server, It will print the port where rpc-proxy is run
 
 Whenever there is a http request , we are printing request body and response body along with headers.Along with that we are measuring the time for each api. Currently we are storing the total response time, total no of api calls for a particular path.
 
-##Docker
+## Docker
 
-1. Build
+1.Build
 
-```
+```shell
  export CGO_ENABLED=0 && go build
 ```
 
-2. Prepare docker image
+2.Prepare docker image
 
-```
+```shell
 docker build -t gochain/rpc-proxy .
 ```
-3. Run docker image
 
-```
+3.Run docker image
+
+```shell
 docker run --rm -it -p 8545:8545 gochain/rpc-proxy rpc-proxy -url http://SOME_IP:8545 -allow "eth_*,net_*" -rpm 100
 ```

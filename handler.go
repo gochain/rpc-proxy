@@ -7,15 +7,18 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 )
 
 type myTransport struct {
+	matcher
+	stats map[string]MonitoringPath
+	statsMu sync.RWMutex
 }
 
 type ModifiedRequest struct {
 	Path       string
-	Method     string
 	RemoteAddr string
 }
 
@@ -48,7 +51,6 @@ func parseRequest(r *http.Request) ModifiedRequest {
 	}
 	return ModifiedRequest{
 		Path:       path,
-		Method:     r.Method,
 		RemoteAddr: ip,
 	}
 }
@@ -58,7 +60,7 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	start := time.Now()
 	parsedRequest := parseRequest(request)
 
-	if !MatchAnyRule(parsedRequest) {
+	if !t.MatchAnyRule(parsedRequest) {
 		log.Println("Not allowed:", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
 		return &http.Response{
 			Body:       ioutil.NopCloser(bytes.NewBufferString("You are not authorized to make this request")),
@@ -83,7 +85,7 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 		}, err
 	}
 	elapsed := time.Since(start)
-	updateStats(parsedRequest, elapsed)
+	t.updateStats(parsedRequest, elapsed)
 	log.Println("Response Time:", elapsed.Seconds(), " path: ", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
 
 	return response, err

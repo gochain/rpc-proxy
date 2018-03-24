@@ -13,7 +13,7 @@ import (
 
 type myTransport struct {
 	matcher
-	stats map[string]MonitoringPath
+	stats   map[string]MonitoringPath
 	statsMu sync.RWMutex
 }
 
@@ -60,19 +60,19 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	start := time.Now()
 	parsedRequest := parseRequest(request)
 
-	if !t.MatchAnyRule(parsedRequest) {
-		log.Println("Not allowed:", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
-		return &http.Response{
-			Body:       ioutil.NopCloser(bytes.NewBufferString("You are not authorized to make this request")),
-			StatusCode: http.StatusUnauthorized,
-		}, nil
-	}
-
 	if !AllowLimit(parsedRequest) {
 		log.Println("User hit the limit:", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
 		return &http.Response{
 			Body:       ioutil.NopCloser(bytes.NewBufferString("You hit the request limit")),
 			StatusCode: http.StatusTooManyRequests,
+		}, nil
+	}
+
+	if !t.MatchAnyRule(parsedRequest) {
+		log.Println("Not allowed:", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
+		return &http.Response{
+			Body:       ioutil.NopCloser(bytes.NewBufferString("You are not authorized to make this request")),
+			StatusCode: http.StatusUnauthorized,
 		}, nil
 	}
 

@@ -7,6 +7,9 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+
+	"github.com/go-chi/chi"
+	"github.com/go-chi/cors"
 )
 
 type Prox struct {
@@ -73,14 +76,25 @@ func main() {
 	// filling matcher rules
 	rules, err := newMatcher(strings.Split(*allowedPathes, ","))
 	if err != nil {
-		log.Println("Cannot parse list of allowed pathes", err)
+		log.Println("Cannot parse list of allowed paths", err)
 	}
 	// proxy
 	proxy := NewProxy(*redirecturl, rules)
 
-	http.HandleFunc("/rpc-proxy-server-status", proxy.ServerStatus)
+	r := chi.NewRouter()
+	cors := cors.New(cors.Options{
+		// AllowedOrigins: []string{"https://foo.com"}, // Use this to allow specific origin hosts
+		AllowedOrigins: []string{"*"},
+		// AllowOriginFunc:  func(r *http.Request, origin string) bool { return true },
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		ExposedHeaders:   []string{"Link"},
+		AllowCredentials: true,
+		MaxAge:           300, // Maximum value not ignored by any of major browsers
+	})
+	r.Use(cors.Handler)
 
-	// server redirection
-	http.HandleFunc("/", proxy.handle)
-	log.Fatal(http.ListenAndServe(":"+*port, nil))
+	r.Get("/rpc-proxy-server-status", proxy.ServerStatus)
+	r.HandleFunc("/", proxy.handle)
+	log.Fatal(http.ListenAndServe(":"+*port, r))
 }

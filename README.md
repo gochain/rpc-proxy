@@ -4,7 +4,7 @@
 
 ### Prerequisites
 
-Go Version 1.9+
+Go Version 1.10+
 if not installed you can follow this documentation https://golang.org/doc/install
 
 ## Deployment
@@ -35,20 +35,14 @@ Whenever there is a http request , we are printing request body and response bod
 
 ## Docker
 
-1.Build
+Build Docker image:
 
-```shell
- export CGO_ENABLED=0 && go build
+```sh
+make build
 ```
 
-2.Prepare docker image
+Run it:
 
-```shell
-docker build -t gochain/rpc-proxy .
-```
-
-3.Run docker image
-
-```shell
-docker run --rm -it -p 8545:8545 gochain/rpc-proxy rpc-proxy -url http://SOME_IP:8545 -allow "eth_*,net_*" -rpm 100
+```sh
+docker run --rm -it -p 8545:8545 gochain/rpc-proxy -url http://SOME_IP:8545 -allow "eth_*,net_*" -rpm 1000
 ```

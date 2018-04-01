@@ -17,8 +17,8 @@ func per(eventCount int, duration time.Duration) rate.Limit {
 }
 
 func addVisitor(ip string) *rate.Limiter {
-	limiter := rate.NewLimiter(per(*requestsPerMinuteLimit, time.Minute), 10)
-	log.Println("Added new visitor:", ip, " limit ", fmt.Sprint(*requestsPerMinuteLimit))
+	limiter := rate.NewLimiter(per(requestsPerMinuteLimit, time.Minute), 10)
+	log.Println("Added new visitor:", ip, " limit ", fmt.Sprint(requestsPerMinuteLimit))
 	mtx.Lock()
 	visitors[ip] = limiter
 	mtx.Unlock()

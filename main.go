@@ -1,15 +1,16 @@
 package main
 
 import (
-	"flag"
 	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/go-chi/chi"
 	"github.com/go-chi/cors"
+	"github.com/urfave/cli"
 )
 
 type Prox struct {
@@ -43,55 +44,75 @@ func (p *Prox) ServerStatus(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-var port *string
-var redirecturl *string
-var allowedPathes *string
-var requestsPerMinuteLimit *int
+var requestsPerMinuteLimit int
 
 func main() {
-	const (
-		defaultPort                   = "8545"
-		defaultPortUsage              = "default server port, ':8545'"
-		defaultTarget                 = "http://127.0.0.1:8040"
-		defaultTargetUsage            = "redirect url, 'http://127.0.0.1:8040'"
-		defaultAllowedPath            = "eth*,net_*"
-		defaultAllowedPathUsage       = "list of allowed pathes(separated by commas) - 'eth*,net_*'"
-		defaultRequestsPerMinute      = 1000
-		defaultRequestsPerMinuteUsage = "limit for number of requests per minute from single IP"
-	)
 
-	// flags
-	port = flag.String("port", defaultPort, defaultPortUsage)
-	redirecturl = flag.String("url", defaultTarget, defaultTargetUsage)
-	allowedPathes = flag.String("allow", defaultAllowedPath, defaultAllowedPathUsage)
-	requestsPerMinuteLimit = flag.Int("rpm", defaultRequestsPerMinute, defaultRequestsPerMinuteUsage)
+	var port string
+	var redirecturl string
+	var allowedPathes string
 
-	flag.Parse()
+	app := cli.NewApp()
 
-	log.Println("server will run on :", *port)
-	log.Println("redirecting to :", *redirecturl)
-	log.Println("list of allowed pathes :", *allowedPathes)
-	log.Println("requests from IP per minute limited to :", *requestsPerMinuteLimit)
-
-	// filling matcher rules
-	rules, err := newMatcher(strings.Split(*allowedPathes, ","))
-	if err != nil {
-		log.Println("Cannot parse list of allowed paths", err)
+	app.Flags = []cli.Flag{
+		cli.StringFlag{
+			Name:        "port, p",
+			Value:       "8545",
+			Usage:       "default server port, ':8545'",
+			Destination: &port,
+		},
+		cli.StringFlag{
+			Name:        "url, u",
+			Value:       "http://127.0.0.1:8040",
+			Usage:       "redirect url, default is http://127.0.0.1:8040",
+			Destination: &redirecturl,
+		},
+		cli.StringFlag{
+			Name:        "allow, a",
+			Value:       "eth*,net_*",
+			Usage:       "list of allowed pathes(separated by commas) - default is 'eth*,net_*'",
+			Destination: &allowedPathes,
+		},
+		cli.IntFlag{
+			Name:        "rpm",
+			Value:       1000,
+			Usage:       "limit for number of requests per minute from single IP(default it 1000)",
+			Destination: &requestsPerMinuteLimit,
+		},
 	}
-	// proxy
-	proxy := NewProxy(*redirecturl, rules)
 
-	r := chi.NewRouter()
-	cors := cors.New(cors.Options{
-		AllowedOrigins:   []string{"*"},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
-		AllowCredentials: true,
-		MaxAge:           300, // Maximum value not ignored by any of major browsers
-	})
-	r.Use(cors.Handler)
+	app.Action = func(c *cli.Context) error {
+		log.Println("server will run on :", port)
+		log.Println("redirecting to :", redirecturl)
+		log.Println("list of allowed pathes :", allowedPathes)
+		log.Println("requests from IP per minute limited to :", requestsPerMinuteLimit)
 
-	r.Get("/rpc-proxy-server-status", proxy.ServerStatus)
-	r.HandleFunc("/", proxy.handle)
-	log.Fatal(http.ListenAndServe(":"+*port, r))
+		// filling matcher rules
+		rules, err := newMatcher(strings.Split(allowedPathes, ","))
+		if err != nil {
+			log.Println("Cannot parse list of allowed paths", err)
+		}
+		// proxy
+		proxy := NewProxy(redirecturl, rules)
+
+		r := chi.NewRouter()
+		cors := cors.New(cors.Options{
+			AllowedOrigins:   []string{"*"},
+			AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
+			AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+			AllowCredentials: true,
+			MaxAge:           300, // Maximum value not ignored by any of major browsers
+		})
+		r.Use(cors.Handler)
+
+		r.Get("/rpc-proxy-server-status", proxy.ServerStatus)
+		r.HandleFunc("/", proxy.handle)
+		log.Fatal(http.ListenAndServe(":"+port, r))
+		return nil
+	}
+
+	err := app.Run(os.Args)
+	if err != nil {
+		log.Fatal(err)
+	}
 }

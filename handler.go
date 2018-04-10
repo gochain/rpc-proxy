@@ -109,7 +109,7 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 				StatusCode: http.StatusUnauthorized,
 			}, nil
 		}
-
+		request.Host = parsedRequest.RemoteAddr //workaround for CloudFlare
 		response, err = http.DefaultTransport.RoundTrip(request)
 		if err != nil {
 			print("\n\ncame in error resp here", err)

@@ -20,11 +20,13 @@ type myTransport struct {
 type ModifiedRequest struct {
 	Path       string
 	RemoteAddr string
+	ID         string
 }
 
 //RPC request
 type rpcRequest struct {
 	Method string
+	ID     string `json:"id,omitempty"`
 }
 
 func isBatch(msg []byte) bool {
@@ -53,6 +55,7 @@ func parseRequests(r *http.Request) []ModifiedRequest {
 				if err == nil {
 					for _, t := range arr {
 						res = append(res, ModifiedRequest{
+							ID:         t.ID,
 							Path:       t.Method,
 							RemoteAddr: ip,
 						})
@@ -65,6 +68,7 @@ func parseRequests(r *http.Request) []ModifiedRequest {
 				err = json.Unmarshal(bodyBytes, &t)
 				if err == nil {
 					res = append(res, ModifiedRequest{
+						ID:         t.ID,
 						Path:       t.Method,
 						RemoteAddr: ip,
 					})
@@ -87,6 +91,31 @@ func parseRequests(r *http.Request) []ModifiedRequest {
 	return res
 }
 
+func jsonRPCError(id string, code int, msg string) (*http.Response, error) {
+	type errResponse struct {
+		Version string `json:"jsonrpc"`
+		ID      string `json:"id"`
+		Error   struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	resp := errResponse{
+		Version: "2.0",
+		ID:      id,
+	}
+	resp.Error.Code = code
+	resp.Error.Message = msg
+	body, err := json.Marshal(&resp)
+	if err != nil {
+		return nil, err
+	}
+	return &http.Response{
+		Body:       ioutil.NopCloser(bytes.NewReader(body)),
+		StatusCode: http.StatusOK,
+	}, nil
+}
+
 func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	var response *http.Response
 	var err error
@@ -96,27 +125,18 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	for _, parsedRequest := range parsedRequests {
 		if !AllowLimit(parsedRequest) {
 			log.Println("User hit the limit:", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
-			return &http.Response{
-				Body:       ioutil.NopCloser(bytes.NewBufferString("You hit the request limit")),
-				StatusCode: http.StatusTooManyRequests,
-			}, nil
+			return jsonRPCError(parsedRequest.ID, -32000, "You hit the request limit")
 		}
 
 		if !t.MatchAnyRule(parsedRequest) {
 			log.Println("Not allowed:", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
-			return &http.Response{
-				Body:       ioutil.NopCloser(bytes.NewBufferString("You are not authorized to make this request")),
-				StatusCode: http.StatusUnauthorized,
-			}, nil
+			return jsonRPCError(parsedRequest.ID, -32601, "You are not authorized to make this request")
 		}
 		request.Host = parsedRequest.RemoteAddr //workaround for CloudFlare
 		response, err = http.DefaultTransport.RoundTrip(request)
 		if err != nil {
 			print("\n\ncame in error resp here", err)
-			return &http.Response{
-				Body:       ioutil.NopCloser(bytes.NewBufferString("Internal error")),
-				StatusCode: http.StatusInternalServerError,
-			}, err
+			return jsonRPCError(parsedRequest.ID, -32603, "Internal error")
 		}
 	}
 	elapsed := time.Since(start)

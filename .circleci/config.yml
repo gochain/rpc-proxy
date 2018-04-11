@@ -20,6 +20,8 @@ jobs:
             sudo rm -rf /usr/local/go
             wget https://storage.googleapis.com/golang/go$GOVERSION.$OS-$ARCH.tar.gz
             sudo tar -C /usr/local -xzf go$GOVERSION.$OS-$ARCH.tar.gz
+            cd ..
+            rm -r tmp
             export PATH=$PATH:$HOME/go/bin
       - run: go version
       - run:

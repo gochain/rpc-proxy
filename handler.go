@@ -21,13 +21,13 @@ type myTransport struct {
 type ModifiedRequest struct {
 	Path       string
 	RemoteAddr string
-	ID         string
+	ID         json.RawMessage
 }
 
 //RPC request
 type rpcRequest struct {
 	Method string
-	ID     string `json:"id,omitempty"`
+	ID     json.RawMessage `json:"id,omitempty"`
 }
 
 func isBatch(msg []byte) bool {
@@ -92,10 +92,10 @@ func parseRequests(r *http.Request) []ModifiedRequest {
 	return res
 }
 
-func jsonRPCError(id string, code int, msg string) (*http.Response, error) {
+func jsonRPCError(id json.RawMessage, code int, msg string) (*http.Response, error) {
 	type errResponse struct {
-		Version string `json:"jsonrpc"`
-		ID      string `json:"id"`
+		Version string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
 		Error   struct {
 			Code    int    `json:"code"`
 			Message string `json:"message"`

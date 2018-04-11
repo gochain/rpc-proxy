@@ -133,13 +133,14 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 			log.Println("Not allowed:", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
 			return jsonRPCError(parsedRequest.ID, -32601, "You are not authorized to make this request")
 		}
-		request.Host = parsedRequest.RemoteAddr //workaround for CloudFlare
-		response, err = http.DefaultTransport.RoundTrip(request)
-		if err != nil {
-			log.Println("Error response from RoundTrip:", err)
-			return jsonRPCError(parsedRequest.ID, -32603, "Internal error")
-		}
 	}
+	request.Host = request.RemoteAddr //workaround for CloudFlare
+	response, err = http.DefaultTransport.RoundTrip(request)
+	if err != nil {
+		log.Println("Error response from RoundTrip:", err)
+		return jsonRPCError(parsedRequests[0].ID, -32603, "Internal error") //returning ID of the first request
+	}
+
 	elapsed := time.Since(start)
 
 	for _, parsedRequest := range parsedRequests {

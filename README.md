@@ -1,5 +1,7 @@
 # rpc-proxy
 
+[![CircleCI](https://circleci.com/gh/gochain-io/rpc-proxy/tree/master.svg?style=svg)](https://circleci.com/gh/gochain-io/rpc-proxy/tree/master)
+
 ## Getting Started
 
 ### Prerequisites

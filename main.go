@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi"
 	"github.com/go-chi/cors"
 	"github.com/urfave/cli"
+	"golang.org/x/time/rate"
 )
 
 type Prox struct {
@@ -19,12 +20,17 @@ type Prox struct {
 	myTransport
 }
 
-func NewProxy(target string, m matcher) *Prox {
+func NewProxy(target string, m matcher, noLimitIPs []string) *Prox {
 	url, _ := url.Parse(target)
 
 	p := &Prox{target: url, proxy: httputil.NewSingleHostReverseProxy(url)}
 	p.stats = make(map[string]MonitoringPath)
 	p.matcher = m
+	p.visitors = make(map[string]*rate.Limiter)
+	p.noLimitIPs = make(map[string]struct{})
+	for _, ip := range noLimitIPs {
+		p.noLimitIPs[ip] = struct{}{}
+	}
 	p.proxy.Transport = &p.myTransport
 	return p
 }
@@ -51,6 +57,7 @@ func main() {
 	var port string
 	var redirecturl string
 	var allowedPathes string
+	var noLimitIPs string
 
 	app := cli.NewApp()
 
@@ -79,12 +86,18 @@ func main() {
 			Usage:       "limit for number of requests per minute from single IP(default it 1000)",
 			Destination: &requestsPerMinuteLimit,
 		},
+		cli.StringFlag{
+			Name:        "nolimit, n",
+			Usage:       "list of ips allowed unlimited requests(separated by commas)",
+			Destination: &noLimitIPs,
+		},
 	}
 
 	app.Action = func(c *cli.Context) error {
 		log.Println("server will run on :", port)
 		log.Println("redirecting to :", redirecturl)
 		log.Println("list of allowed pathes :", allowedPathes)
+		log.Println("list of no-limit IPs :", noLimitIPs)
 		log.Println("requests from IP per minute limited to :", requestsPerMinuteLimit)
 
 		// filling matcher rules
@@ -93,7 +106,8 @@ func main() {
 			log.Println("Cannot parse list of allowed paths", err)
 		}
 		// proxy
-		proxy := NewProxy(redirecturl, rules)
+
+		proxy := NewProxy(redirecturl, rules, strings.Split(noLimitIPs, ","))
 
 		r := chi.NewRouter()
 		cors := cors.New(cors.Options{

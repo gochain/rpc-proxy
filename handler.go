@@ -58,7 +58,7 @@ func parseRequests(r *http.Request) []ModifiedRequest {
 						})
 					}
 				} else {
-					log.Println("cannot parse JSON single request", "err", err.Error(), r)
+					log.Println("cannot parse JSON batch request", "err", err.Error(), r)
 				}
 			} else {
 				var t rpcRequest
@@ -69,7 +69,7 @@ func parseRequests(r *http.Request) []ModifiedRequest {
 						RemoteAddr: ip,
 					})
 				} else {
-					log.Println("cannot parse JSON batch request", "err", err.Error(), r)
+					log.Println("cannot parse JSON single request", "err", err.Error(), r)
 				}
 			}
 		} else {
@@ -112,7 +112,7 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 		request.Host = parsedRequest.RemoteAddr //workaround for CloudFlare
 		response, err = http.DefaultTransport.RoundTrip(request)
 		if err != nil {
-			print("\n\ncame in error resp here", err)
+			log.Println("Error response from RoundTrip:", err)
 			return &http.Response{
 				Body:       ioutil.NopCloser(bytes.NewBufferString("Internal error")),
 				StatusCode: http.StatusInternalServerError,

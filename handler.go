@@ -13,6 +13,7 @@ import (
 
 type myTransport struct {
 	matcher
+	limiters
 	stats   map[string]MonitoringPath
 	statsMu sync.RWMutex
 }
@@ -123,7 +124,7 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	parsedRequests := parseRequests(request)
 
 	for _, parsedRequest := range parsedRequests {
-		if !AllowLimit(parsedRequest) {
+		if !t.AllowLimit(parsedRequest) {
 			log.Println("User hit the limit:", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
 			return jsonRPCError(parsedRequest.ID, -32000, "You hit the request limit")
 		}

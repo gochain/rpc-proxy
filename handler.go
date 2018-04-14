@@ -138,7 +138,11 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	response, err = http.DefaultTransport.RoundTrip(request)
 	if err != nil {
 		log.Println("Error response from RoundTrip:", err)
-		return jsonRPCError(parsedRequests[0].ID, -32603, response.StatusCode, "Internal error") //returning ID of the first request
+		returnErrorCode := http.StatusInternalServerError
+		if response != nil {
+			returnErrorCode = response.StatusCode
+		}
+		return jsonRPCError(parsedRequests[0].ID, -32603, returnErrorCode, "Internal error") //returning ID of the first request
 	}
 
 	elapsed := time.Since(start)

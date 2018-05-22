@@ -51,6 +51,7 @@ func (p *Prox) ServerStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 var requestsPerMinuteLimit int
+var verboseLogging bool
 
 func main() {
 
@@ -90,6 +91,11 @@ func main() {
 			Name:        "nolimit, n",
 			Usage:       "list of ips allowed unlimited requests(separated by commas)",
 			Destination: &noLimitIPs,
+		},
+		cli.BoolFlag{
+			Name:        "verbose",
+			Usage:       "verbose logging enabled",
+			Destination: &verboseLogging,
 		},
 	}
 

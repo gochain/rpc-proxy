@@ -149,7 +149,9 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 
 	for _, parsedRequest := range parsedRequests {
 		t.updateStats(parsedRequest, elapsed)
-		log.Println("Response Time:", elapsed.Seconds(), " path: ", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
+		if verboseLogging {
+			log.Println("Response Time:", elapsed.Seconds(), " path: ", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
+		}
 	}
 	return response, err
 }

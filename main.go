@@ -1,54 +1,16 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
 	"strings"
 
 	"github.com/go-chi/chi"
 	"github.com/go-chi/cors"
 	"github.com/urfave/cli"
-	"golang.org/x/time/rate"
 )
-
-type Prox struct {
-	target *url.URL
-	proxy  *httputil.ReverseProxy
-	myTransport
-}
-
-func NewProxy(target string, m matcher, noLimitIPs []string) *Prox {
-	url, _ := url.Parse(target)
-
-	p := &Prox{target: url, proxy: httputil.NewSingleHostReverseProxy(url)}
-	p.stats = make(map[string]MonitoringPath)
-	p.matcher = m
-	p.visitors = make(map[string]*rate.Limiter)
-	p.noLimitIPs = make(map[string]struct{})
-	for _, ip := range noLimitIPs {
-		p.noLimitIPs[ip] = struct{}{}
-	}
-	p.proxy.Transport = &p.myTransport
-	return p
-}
-
-func (p *Prox) handle(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("X-rpc-proxy", "rpc-proxy")
-	p.proxy.ServeHTTP(w, r)
-}
-
-func (p *Prox) ServerStatus(w http.ResponseWriter, r *http.Request) {
-	stats, err := p.getStats()
-	if err != nil {
-		http.Error(w, "failed to get stats", http.StatusInternalServerError)
-		log.Println("Failed to get server stats:", err)
-	} else {
-		w.Write(stats)
-	}
-}
 
 var requestsPerMinuteLimit int
 var verboseLogging bool
@@ -57,7 +19,7 @@ func main() {
 
 	var port string
 	var redirecturl string
-	var allowedPathes string
+	var allowedPaths string
 	var noLimitIPs string
 
 	app := cli.NewApp()
@@ -79,7 +41,7 @@ func main() {
 			Name:        "allow, a",
 			Value:       "eth*,net_*",
 			Usage:       "list of allowed pathes(separated by commas) - default is 'eth*,net_*'",
-			Destination: &allowedPathes,
+			Destination: &allowedPaths,
 		},
 		cli.IntFlag{
 			Name:        "rpm",
@@ -102,18 +64,15 @@ func main() {
 	app.Action = func(c *cli.Context) error {
 		log.Println("server will run on :", port)
 		log.Println("redirecting to :", redirecturl)
-		log.Println("list of allowed pathes :", allowedPathes)
+		log.Println("list of allowed pathes :", allowedPaths)
 		log.Println("list of no-limit IPs :", noLimitIPs)
 		log.Println("requests from IP per minute limited to :", requestsPerMinuteLimit)
 
-		// filling matcher rules
-		rules, err := newMatcher(strings.Split(allowedPathes, ","))
+		// Create proxy server.
+		server, err := NewServer(redirecturl, strings.Split(allowedPaths, ","), strings.Split(noLimitIPs, ","))
 		if err != nil {
-			log.Println("Cannot parse list of allowed paths", err)
+			return fmt.Errorf("failed to start server: %s", err)
 		}
-		// proxy
-
-		proxy := NewProxy(redirecturl, rules, strings.Split(noLimitIPs, ","))
 
 		r := chi.NewRouter()
 		cors := cors.New(cors.Options{
@@ -125,8 +84,9 @@ func main() {
 		})
 		r.Use(cors.Handler)
 
-		r.Get("/rpc-proxy-server-status", proxy.ServerStatus)
-		r.HandleFunc("/", proxy.handle)
+		r.Get("/", server.HomePage)
+		r.Get("/stats", server.Stats)
+		r.HandleFunc("/*", server.RPCProxy)
 		log.Fatal(http.ListenAndServe(":"+port, r))
 		return nil
 	}

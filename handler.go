@@ -92,7 +92,7 @@ func parseRequests(r *http.Request) []ModifiedRequest {
 	return res
 }
 
-func jsonRPCError(id json.RawMessage, jsonCode, httpCode int, msg string) (*http.Response, error) {
+func jsonRPCError(id json.RawMessage, jsonCode int, msg string) interface{} {
 	type errResponse struct {
 		Version string          `json:"jsonrpc"`
 		ID      json.RawMessage `json:"id"`
@@ -107,7 +107,11 @@ func jsonRPCError(id json.RawMessage, jsonCode, httpCode int, msg string) (*http
 	}
 	resp.Error.Code = jsonCode
 	resp.Error.Message = msg
-	body, err := json.Marshal(&resp)
+	return resp
+}
+
+func jsonRPCResponse(id json.RawMessage, jsonCode, httpCode int, msg string) (*http.Response, error) {
+	body, err := json.Marshal(jsonRPCError(id, jsonCode, msg))
 	if err != nil {
 		return nil, err
 	}
@@ -126,12 +130,12 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	for _, parsedRequest := range parsedRequests {
 		if !t.AllowLimit(parsedRequest) {
 			log.Println("User hit the limit:", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
-			return jsonRPCError(parsedRequest.ID, -32000, http.StatusTooManyRequests, "You hit the request limit")
+			return jsonRPCResponse(parsedRequest.ID, -32000, http.StatusTooManyRequests, "You hit the request limit")
 		}
 
 		if !t.MatchAnyRule(parsedRequest) {
 			log.Println("Not allowed:", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
-			return jsonRPCError(parsedRequest.ID, -32601, http.StatusUnauthorized, "You are not authorized to make this request")
+			return jsonRPCResponse(parsedRequest.ID, -32601, http.StatusUnauthorized, "You are not authorized to make this request")
 		}
 	}
 	request.Host = request.RemoteAddr //workaround for CloudFlare
@@ -142,7 +146,7 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 		if response != nil {
 			returnErrorCode = response.StatusCode
 		}
-		return jsonRPCError(parsedRequests[0].ID, -32603, returnErrorCode, "Internal error") //returning ID of the first request
+		return jsonRPCResponse(parsedRequests[0].ID, -32603, returnErrorCode, "Internal error") //returning ID of the first request
 	}
 
 	elapsed := time.Since(start)

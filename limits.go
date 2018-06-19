@@ -48,7 +48,6 @@ func (ls *limiters) AllowLimit(r ModifiedRequest) bool {
 	}
 	limiter := ls.getVisitor(r.RemoteAddr)
 	if limiter.Allow() == false {
-		log.Println("Exceeds limiter's burst path: ", r.Path, " ip: ", r.RemoteAddr)
 		return false
 	}
 	return true

@@ -129,7 +129,9 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 
 	for _, parsedRequest := range parsedRequests {
 		if !t.AllowLimit(parsedRequest) {
-			log.Println("User hit the limit:", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
+			if verboseLogging {
+				log.Println("User hit the limit:", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
+			}
 			return jsonRPCResponse(parsedRequest.ID, -32000, http.StatusTooManyRequests, "You hit the request limit")
 		}
 

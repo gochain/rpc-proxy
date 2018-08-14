@@ -36,6 +36,12 @@ jobs:
             ${GOPATH}/bin/dep ensure --vendor-only
       - run: make test
       - run: make build
+      - run:
+          name: install gcloud
+          command: |
+            wget https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-204.0.0-linux-x86_64.tar.gz --directory-prefix=tmp
+            tar -xvzf tmp/google-cloud-sdk-204.0.0-linux-x86_64.tar.gz -C tmp
+            ./tmp/google-cloud-sdk/install.sh -q
       - deploy:
           command: |
             if [[ "${CIRCLE_BRANCH}" == "master" && -z "${CIRCLE_PR_REPONAME}" ]]; then

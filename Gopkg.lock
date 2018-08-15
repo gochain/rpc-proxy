@@ -2,38 +2,53 @@
 
 
 [[projects]]
+  digest = "1:66ddebb274faa160a4a23394a17ad3c8e15fee9bf5408d13f77d22b61bc7f072"
   name = "github.com/go-chi/chi"
   packages = ["."]
+  pruneopts = "UT"
   revision = "e83ac2304db3c50cf03d96a2fcd39009d458bc35"
   version = "v3.3.2"
 
 [[projects]]
-  name = "github.com/go-chi/cors"
+  digest = "1:0b8dd7447e420afff0260179dc892711e837edd1d446bc78dab924624a3c3c81"
+  name = "github.com/rs/cors"
   packages = ["."]
-  revision = "dba6525398619dead495962a916728e7ee2ca322"
-  version = "v1.0.0"
+  pruneopts = "UT"
+  revision = "3fb1b69b103a84de38a19c3c6ec073dd6caa4d3f"
+  version = "v1.5.0"
 
 [[projects]]
+  digest = "1:b24d38b282bacf9791408a080f606370efa3d364e4b5fd9ba0f7b87786d3b679"
   name = "github.com/urfave/cli"
   packages = ["."]
+  pruneopts = "UT"
   revision = "cfb38830724cc34fedffe9a2a29fb54fa9169cd1"
   version = "v1.20.0"
 
 [[projects]]
   branch = "master"
+  digest = "1:76ee51c3f468493aff39dbacc401e8831fbb765104cbf613b89bef01cf4bad70"
   name = "golang.org/x/net"
   packages = ["context"]
+  pruneopts = "UT"
   revision = "61147c48b25b599e5b561d2e9c4f3e1ef489ca41"
 
 [[projects]]
   branch = "master"
+  digest = "1:51a479a09b7ed06b7be5a854e27fcc328718ae0e5ad159f9ddeef12d0326c2e7"
   name = "golang.org/x/time"
   packages = ["rate"]
+  pruneopts = "UT"
   revision = "26559e0f760e39c24d730d3224364aef164ee23f"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "55c95cd576faaf34f73b6ddb8e01c4e6943f142c024aba5cb4036e3af1eff4e9"
+  input-imports = [
+    "github.com/go-chi/chi",
+    "github.com/rs/cors",
+    "github.com/urfave/cli",
+    "golang.org/x/time/rate",
+  ]
   solver-name = "gps-cdcl"
   solver-version = 1

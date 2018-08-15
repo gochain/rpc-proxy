@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi"
-	"github.com/go-chi/cors"
+	"github.com/rs/cors"
 	"github.com/urfave/cli"
 )
 
@@ -64,7 +64,7 @@ func main() {
 	app.Action = func(c *cli.Context) error {
 		log.Println("server will run on :", port)
 		log.Println("redirecting to :", redirecturl)
-		log.Println("list of allowed pathes :", allowedPaths)
+		log.Println("list of allowed paths :", allowedPaths)
 		log.Println("list of no-limit IPs :", noLimitIPs)
 		log.Println("requests from IP per minute limited to :", requestsPerMinuteLimit)
 
@@ -75,14 +75,14 @@ func main() {
 		}
 
 		r := chi.NewRouter()
-		cors := cors.New(cors.Options{
+		// Use default options
+		r.Use(cors.New(cors.Options{
 			AllowedOrigins:   []string{"*"},
-			AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
-			AllowedHeaders:   []string{"Origin", "Accept", "Authorization", "Content-Type", "X-CSRF-Token", "x-requested-with"},
-			AllowCredentials: true,
-			MaxAge:           300, // Maximum value not ignored by any of major browsers
-		})
-		r.Use(cors.Handler)
+			AllowedMethods:   []string{"HEAD", "GET", "POST", "PUT", "PATCH", "DELETE"},
+			AllowedHeaders:   []string{"*"},
+			AllowCredentials: false,
+			MaxAge:           3600,
+		}).Handler)
 
 		r.Get("/", server.HomePage)
 		r.Get("/stats", server.Stats)

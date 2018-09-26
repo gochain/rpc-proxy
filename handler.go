@@ -113,6 +113,7 @@ func jsonRPCError(id json.RawMessage, jsonCode int, msg string) interface{} {
 func jsonRPCResponse(id json.RawMessage, jsonCode, httpCode int, msg string) (*http.Response, error) {
 	body, err := json.Marshal(jsonRPCError(id, jsonCode, msg))
 	if err != nil {
+		log.Println("Failed to serialize JSON RPC error:", err)
 		return nil, err
 	}
 	return &http.Response{
@@ -122,8 +123,6 @@ func jsonRPCResponse(id json.RawMessage, jsonCode, httpCode int, msg string) (*h
 }
 
 func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	var response *http.Response
-	var err error
 	start := time.Now()
 	parsedRequests := parseRequests(request)
 
@@ -141,7 +140,7 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 		}
 	}
 	request.Host = request.RemoteAddr //workaround for CloudFlare
-	response, err = http.DefaultTransport.RoundTrip(request)
+	response, err := http.DefaultTransport.RoundTrip(request)
 	if err != nil {
 		log.Println("Error response from RoundTrip:", err)
 		returnErrorCode := http.StatusInternalServerError
@@ -159,5 +158,5 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 			log.Println("Response Time:", elapsed.Seconds(), " path: ", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
 		}
 	}
-	return response, err
+	return response, nil
 }

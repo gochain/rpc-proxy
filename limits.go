@@ -15,10 +15,6 @@ type limiters struct {
 	sync.RWMutex
 }
 
-func per(eventCount int, duration time.Duration) rate.Limit {
-	return rate.Every(duration / time.Duration(eventCount))
-}
-
 func (ls *limiters) tryAddVisitor(ip string) *rate.Limiter {
 	ls.Lock()
 	defer ls.Unlock()
@@ -26,7 +22,8 @@ func (ls *limiters) tryAddVisitor(ip string) *rate.Limiter {
 	if exists {
 		return limiter
 	}
-	limiter = rate.NewLimiter(per(requestsPerMinuteLimit, time.Minute), 10)
+	limit := rate.Every(time.Minute / time.Duration(requestsPerMinuteLimit))
+	limiter = rate.NewLimiter(limit, requestsPerMinuteLimit/10)
 	log.Println("Added new visitor:", ip, " limit ", fmt.Sprint(requestsPerMinuteLimit))
 	ls.visitors[ip] = limiter
 	return limiter

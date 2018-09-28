@@ -42,11 +42,11 @@ func NewServer(target string, allowedPaths []string, noLimitIPs []string) (*Serv
 
 	// Generate static home page.
 	id := json.RawMessage([]byte(`"ID"`))
-	responseRateLimit, err := json.MarshalIndent(jsonRPCError(id, -32000, "You hit the request limit"), "", "  ")
+	responseRateLimit, err := json.MarshalIndent(jsonRPCLimit(id), "", "  ")
 	if err != nil {
 		return nil, err
 	}
-	responseUnauthorized, err := json.MarshalIndent(jsonRPCError(id, -32601, "You are not authorized to make this request"), "", "  ")
+	responseUnauthorized, err := json.MarshalIndent(jsonRPCUnauthorized(id, "<method_name>"), "", "  ")
 	if err != nil {
 		return nil, err
 	}

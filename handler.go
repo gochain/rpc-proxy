@@ -110,8 +110,16 @@ func jsonRPCError(id json.RawMessage, jsonCode int, msg string) interface{} {
 	return resp
 }
 
-func jsonRPCResponse(id json.RawMessage, jsonCode, httpCode int, msg string) (*http.Response, error) {
-	body, err := json.Marshal(jsonRPCError(id, jsonCode, msg))
+func jsonRPCUnauthorized(id json.RawMessage, method string) interface{} {
+	return jsonRPCError(id, -32601, "You are not authorized to make this request: "+method)
+}
+
+func jsonRPCLimit(id json.RawMessage) interface{} {
+	return jsonRPCError(id, -32000, "You hit the request limit")
+}
+
+func jsonRPCResponse(httpCode int, v interface{}) (*http.Response, error) {
+	body, err := json.Marshal(v)
 	if err != nil {
 		log.Println("Failed to serialize JSON RPC error:", err)
 		return nil, err
@@ -131,12 +139,12 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 			if verboseLogging {
 				log.Println("User hit the limit:", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
 			}
-			return jsonRPCResponse(parsedRequest.ID, -32000, http.StatusTooManyRequests, "You hit the request limit")
+			return jsonRPCResponse(http.StatusTooManyRequests, jsonRPCLimit(parsedRequest.ID))
 		}
 
 		if !t.MatchAnyRule(parsedRequest) {
 			log.Println("Not allowed:", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
-			return jsonRPCResponse(parsedRequest.ID, -32601, http.StatusUnauthorized, "You are not authorized to make this request")
+			return jsonRPCResponse(http.StatusMethodNotAllowed, jsonRPCUnauthorized(parsedRequest.ID, parsedRequest.Path))
 		}
 	}
 	request.Host = request.RemoteAddr //workaround for CloudFlare
@@ -147,7 +155,7 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 		if response != nil {
 			returnErrorCode = response.StatusCode
 		}
-		return jsonRPCResponse(parsedRequests[0].ID, -32603, returnErrorCode, "Internal error") //returning ID of the first request
+		return jsonRPCResponse(returnErrorCode, jsonRPCError(parsedRequests[0].ID, -32603, "Internal error"))
 	}
 
 	elapsed := time.Since(start)

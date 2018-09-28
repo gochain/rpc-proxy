@@ -46,7 +46,7 @@ func NewServer(target string, allowedPaths []string, noLimitIPs []string) (*Serv
 	if err != nil {
 		return nil, err
 	}
-	responseUnauthorized, err := json.MarshalIndent(jsonRPCUnauthorized(id, "<method_name>"), "", "  ")
+	responseUnauthorized, err := json.MarshalIndent(jsonRPCUnauthorized(id, "method_name"), "", "  ")
 	if err != nil {
 		return nil, err
 	}

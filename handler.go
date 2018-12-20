@@ -92,6 +92,12 @@ func parseRequests(r *http.Request) []ModifiedRequest {
 	return res
 }
 
+const (
+	jsonRPCTimeout     = -32000
+	jsonRPCUnavailable = -32601
+	jsonRPCInternal    = -32603
+)
+
 func jsonRPCError(id json.RawMessage, jsonCode int, msg string) interface{} {
 	type errResponse struct {
 		Version string          `json:"jsonrpc"`
@@ -111,11 +117,11 @@ func jsonRPCError(id json.RawMessage, jsonCode int, msg string) interface{} {
 }
 
 func jsonRPCUnauthorized(id json.RawMessage, method string) interface{} {
-	return jsonRPCError(id, -32601, "You are not authorized to make this request: "+method)
+	return jsonRPCError(id, jsonRPCUnavailable, "You are not authorized to make this request: "+method)
 }
 
 func jsonRPCLimit(id json.RawMessage) interface{} {
-	return jsonRPCError(id, -32000, "You hit the request limit")
+	return jsonRPCError(id, jsonRPCTimeout, "You hit the request limit")
 }
 
 func jsonRPCResponse(httpCode int, v interface{}) (*http.Response, error) {
@@ -151,11 +157,11 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	response, err := http.DefaultTransport.RoundTrip(request)
 	if err != nil {
 		log.Println("Error response from RoundTrip:", err)
-		returnErrorCode := http.StatusInternalServerError
+		returnErrorCode := http.StatusBadGateway
 		if response != nil {
 			returnErrorCode = response.StatusCode
 		}
-		return jsonRPCResponse(returnErrorCode, jsonRPCError(parsedRequests[0].ID, -32603, "Internal error"))
+		return jsonRPCResponse(returnErrorCode, jsonRPCError(parsedRequests[0].ID, jsonRPCInternal, err.Error()))
 	}
 
 	elapsed := time.Since(start)

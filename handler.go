@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -20,7 +21,7 @@ type myTransport struct {
 
 type ModifiedRequest struct {
 	Path       string
-	RemoteAddr string
+	RemoteAddr string // Original IP, not CloudFlare or load balancer.
 	ID         json.RawMessage
 }
 
@@ -40,12 +41,24 @@ func isBatch(msg []byte) bool {
 	return false
 }
 
+// getIP returns the original IP address from the request, checking special headers before falling back to RemoteAddr.
+func getIP(r *http.Request) string {
+	if ip := r.Header.Get("CF-Connecting-IP"); ip != "" {
+		return ip
+	}
+	if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
+		// Trim off any others: A.B.C.D[,X.X.X.X,Y.Y.Y.Y,]
+		return strings.SplitN(ip, ",", 1)[0]
+	}
+	if ip, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return ip
+	}
+	return r.RemoteAddr
+}
+
 func parseRequests(r *http.Request) []ModifiedRequest {
 	var res []ModifiedRequest
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		ip = r.RemoteAddr
-	}
+	ip := getIP(r)
 	if r.Body != nil {
 		bodyBytes, err := ioutil.ReadAll(r.Body)
 		r.Body.Close() //closing reader

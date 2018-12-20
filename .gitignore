@@ -1,3 +1,4 @@
 rpc-proxy
 vendor/
 /tmp
+.idea

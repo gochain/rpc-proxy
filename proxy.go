@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/go-chi/chi"
 	"html/template"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -89,6 +91,97 @@ func (p *Server) Stats(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (p *Server) Example(w http.ResponseWriter, r *http.Request) {
+	method := chi.URLParam(r, "method")
+	do := func(params ...interface{}) {
+		data, err := p.example(method, params...)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Write(data)
+	}
+	switch method {
+	case "clique_getSigners":
+		do("latest")
+	case "clique_getSnapshot":
+		do("latest")
+	case "clique_getVoters":
+		do("latest")
+	case "eth_blockNumber":
+		do("latest")
+	case "eth_gasPrice":
+		do()
+	case "eth_getBalance":
+		do("0x1234")
+	case "eth_getBlockByNumber":
+		do("latest", false)
+	//TODO fetch from url params
+	//case "eth_getTransaction":
+	//	do("0x0")
+	//case "eth_getTransactionCount":
+	//	do("0x0")
+	//case "eth_getTransactionReceipt":
+	//	do("0x0")
+	case "eth_totalSupply":
+		do("latest")
+	case "net_listening":
+		do()
+	case "net_version":
+		do()
+
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (p *Server) example(method string, params ...interface{}) ([]byte, error) {
+	body, err := json.Marshal(struct {
+		JSONRPC string        `json:"jsonrpc"`
+		ID      string        `json:"id"`
+		Method  string        `json:"method"`
+		Params  []interface{} `json:"params"`
+	}{
+		JSONRPC: "2.0",
+		ID:      "1",
+		Method:  method,
+		Params:  params,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, p.target.String(), bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	const contentType = "application/json"
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Accept", contentType)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	respBody, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var buf bytes.Buffer
+	if err := exampleTmpl.Execute(&buf, &exampleData{Method: method, Request: indent(body), Response: indent(respBody)}); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func indent(b []byte) string {
+	var buf bytes.Buffer
+	_ = json.Indent(&buf, b, "", "  ")
+	return buf.String()
+}
+
 type homePageData struct {
 	Limit                int
 	Methods              []string
@@ -108,6 +201,7 @@ var homePageTmpl = template.Must(template.New("").Parse(`<!DOCTYPE html>
 				padding: 1rem;
 				padding-left: 2rem;
 				background-color:#eee;
+				width:max-content;
 			}
 		</style>
 		<link href="https://fonts.googleapis.com/css?family=Open+Sans:400,300,600,700&amp;subset=all" rel="stylesheet" type="text/css">
@@ -125,13 +219,50 @@ var homePageTmpl = template.Must(template.New("").Parse(`<!DOCTYPE html>
 
 		<h2>Allowed Methods</h2>
 
-		<p>Only the following listed methods are allowed. If you attempt to call any other methods, you will receive a 401 response:</p>
+		<p>Only the following listed methods are allowed. Click for an example. If you attempt to call any other methods, you will receive a 401 response:</p>
 
 		<pre class="json">{{.ResponseUnauthorized}}</pre>
 
 		<ul>
-			{{range .Methods}}<li>{{.}}</li>{{end}}
+			{{range .Methods}}<li><a href="x/{{.}}">{{.}}</a></li>{{end}}
 		</ul>
+	<body>
+</html>
+`))
+
+type exampleData struct {
+	Method, Request, Response string
+}
+
+var exampleTmpl = template.Must(template.New("").Parse(`<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>GoChain RPC Proxy</title>
+		<style>
+			body {
+				font-family: 'Lato', sans-serif;
+			}
+			.json {
+				padding: 1rem;
+				padding-left: 2rem;
+				background-color:#eee;
+				width:max-content;
+			}
+		</style>
+		<link href="https://fonts.googleapis.com/css?family=Open+Sans:400,300,600,700&amp;subset=all" rel="stylesheet" type="text/css">
+	</head>
+	<body>
+		<h1>GoChain RPC Proxy</h1>
+
+		<p>This is an example call for <code>{{.Method}}</code>.</p>
+
+		<h2>Request</h2>
+
+		<pre class="json">{{.Request}}</pre>
+
+		<h2>Response</h2>
+
+		<pre class="json">{{.Response}}</pre>
 	<body>
 </html>
 `))

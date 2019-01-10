@@ -1,13 +1,16 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/go-chi/chi"
+	"github.com/pelletier/go-toml"
 	"github.com/rs/cors"
 	"github.com/urfave/cli"
 )
@@ -15,8 +18,17 @@ import (
 var requestsPerMinuteLimit int
 var verboseLogging bool
 
+type ConfigData struct {
+	Port    string
+	URL     string
+	Allow   []string
+	RPM     int
+	NoLimit []string
+}
+
 func main() {
 
+	var configPath string
 	var port string
 	var redirecturl string
 	var allowedPaths string
@@ -25,6 +37,11 @@ func main() {
 	app := cli.NewApp()
 
 	app.Flags = []cli.Flag{
+		cli.StringFlag{
+			Name:        "config, c",
+			Usage:       "path to toml config file",
+			Destination: &configPath,
+		},
 		cli.StringFlag{
 			Name:        "port, p",
 			Value:       "8545",
@@ -39,8 +56,7 @@ func main() {
 		},
 		cli.StringFlag{
 			Name:        "allow, a",
-			Value:       "eth*,net_*",
-			Usage:       "list of allowed pathes(separated by commas) - default is 'eth*,net_*'",
+			Usage:       "comma separated list of allowed paths",
 			Destination: &allowedPaths,
 		},
 		cli.IntFlag{
@@ -62,14 +78,59 @@ func main() {
 	}
 
 	app.Action = func(c *cli.Context) error {
-		log.Println("server will run on :", port)
-		log.Println("redirecting to :", redirecturl)
-		log.Println("list of allowed paths :", allowedPaths)
-		log.Println("list of no-limit IPs :", noLimitIPs)
-		log.Println("requests from IP per minute limited to :", requestsPerMinuteLimit)
+		var cfg ConfigData
+		if configPath != "" {
+			t, err := toml.LoadFile(configPath)
+			if err != nil {
+				return err
+			}
+			if err := t.Unmarshal(&cfg); err != nil {
+				return err
+			}
+		}
+
+		if port != "" {
+			if cfg.Port != "" {
+				return errors.New("port set in two places")
+			}
+			cfg.Port = port
+		}
+		if redirecturl != "" {
+			if cfg.URL != "" {
+				return errors.New("url set in two places")
+			}
+			cfg.URL = redirecturl
+		}
+		if requestsPerMinuteLimit != 0 {
+			if cfg.RPM != 0 {
+				return errors.New("rpm set in two places")
+			}
+			cfg.RPM = requestsPerMinuteLimit
+		}
+		if allowedPaths != "" {
+			if len(cfg.Allow) > 0 {
+				return errors.New("allow set in two places")
+			}
+			cfg.Allow = strings.Split(allowedPaths, ",")
+		}
+		if noLimitIPs != "" {
+			if len(cfg.NoLimit) > 0 {
+				return errors.New("nolimit set in two places")
+			}
+			cfg.NoLimit = strings.Split(noLimitIPs, ",")
+		}
+
+		sort.Strings(cfg.Allow)
+		sort.Strings(cfg.NoLimit)
+
+		log.Println("Server will run on port:", cfg.Port)
+		log.Println("Redirecting to url:", cfg.URL)
+		log.Println("Requests-per-minute for each IP limited to:", cfg.RPM)
+		log.Println("List of IPs exempt from the limit:", cfg.NoLimit)
+		log.Println("List of allowed paths:", cfg.Allow)
 
 		// Create proxy server.
-		server, err := NewServer(redirecturl, strings.Split(allowedPaths, ","), strings.Split(noLimitIPs, ","))
+		server, err := NewServer(redirecturl, cfg.Allow, cfg.NoLimit)
 		if err != nil {
 			return fmt.Errorf("failed to start server: %s", err)
 		}

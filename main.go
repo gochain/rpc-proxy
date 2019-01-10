@@ -86,6 +86,7 @@ func main() {
 
 		r.Get("/", server.HomePage)
 		r.Get("/stats", server.Stats)
+		r.Get("/x/{method}", server.Example)
 		r.HandleFunc("/*", server.RPCProxy)
 		log.Fatal(http.ListenAndServe(":"+port, r))
 		return nil

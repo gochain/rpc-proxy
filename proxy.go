@@ -111,6 +111,8 @@ func (p *Server) Example(w http.ResponseWriter, r *http.Request) {
 		do("latest")
 	case "eth_blockNumber":
 		do("latest")
+	case "eth_chainId":
+		do()
 	case "eth_gasPrice":
 		do()
 	case "eth_getBalance":

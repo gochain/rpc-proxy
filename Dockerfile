@@ -1,5 +1,5 @@
 # Build GoChain in a stock Go builder container
-FROM golang:1.10-alpine as builder
+FROM golang:1.12-alpine as builder
 
 RUN apk --no-cache add build-base git bzr mercurial gcc linux-headers
 ENV D=/go/src/github.com/gochain-io/rpc-proxy

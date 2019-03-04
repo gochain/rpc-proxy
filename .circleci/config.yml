@@ -20,8 +20,6 @@ jobs:
             ./tmp/google-cloud-sdk/install.sh -q
       - setup_remote_docker:
           docker_layer_caching: true
-      - attach_workspace:
-          at: .
       - deploy:
           command: |
             if [[ "${CIRCLE_BRANCH}" == "master" && -z "${CIRCLE_PR_REPONAME}" ]]; then
@@ -31,5 +29,5 @@ jobs:
               echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
               echo $GOOGLE_AUTH | docker login -u _json_key --password-stdin https://gcr.io
               echo $GOOGLE_AUTH > ${HOME}/gcloud-service-key.json
-              make release
+              ./release.sh
             fi

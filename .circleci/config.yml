@@ -1,39 +1,17 @@
 version: 2
 jobs:
   build:
-    machine: true
     working_directory: ~/go/src/github.com/gochain-io/rpc-proxy
+    docker:
+      - image: circleci/golang:1.12
     environment: # apparently expansion doesn't work here yet: https://discuss.circleci.com/t/environment-variable-expansion-in-working-directory/11322
       - GOPATH=/home/circleci/go
       - GOVERSION=1.12
       - OS=linux
       - ARCH=amd64
+      - GO111MODULE=on
     steps:
       - checkout
-      - run:
-          name: update Go
-          command: |
-            go version
-            go env GOROOT
-            mkdir tmp
-            cd tmp
-            sudo rm -rf /usr/local/go
-            wget https://storage.googleapis.com/golang/go$GOVERSION.$OS-$ARCH.tar.gz
-            sudo tar -C /usr/local -xzf go$GOVERSION.$OS-$ARCH.tar.gz
-            export PATH=$PATH:$HOME/go/bin
-      - run: go version
-      - run:
-          name: update Docker
-          command: |
-            docker version
-            sudo service docker stop
-            curl -fsSL https://get.docker.com/ | sudo sh
-      - run: docker version
-      - run:
-          name: install dependencies
-          command: |
-            go get -u github.com/golang/dep/cmd/dep
-            ${GOPATH}/bin/dep ensure --vendor-only
       - run: make test
       - run: make build
       - run:
@@ -42,6 +20,8 @@ jobs:
             wget https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-204.0.0-linux-x86_64.tar.gz --directory-prefix=tmp
             tar -xvzf tmp/google-cloud-sdk-204.0.0-linux-x86_64.tar.gz -C tmp
             ./tmp/google-cloud-sdk/install.sh -q
+      - setup_remote_docker:
+          docker_layer_caching: true
       - deploy:
           command: |
             if [[ "${CIRCLE_BRANCH}" == "master" && -z "${CIRCLE_PR_REPONAME}" ]]; then

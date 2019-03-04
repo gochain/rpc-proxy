@@ -1,7 +1,4 @@
-.PHONY: dep build docker release install test
-
-dep:
-	dep ensure --vendor-only
+.PHONY: build docker release install test
 
 build:
 	go build
@@ -12,9 +9,8 @@ docker:
 release:
 	./release.sh
 
-install: build
-	cp bin/gochain-bootnode $(GOPATH)/bin/gochain-bootnode
-	cp bin/gochain $(GOPATH)/bin/gochain
+install:
+	go install
 
 test:
 	go test ./...

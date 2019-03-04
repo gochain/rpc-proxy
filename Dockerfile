@@ -2,12 +2,15 @@
 FROM golang:1.12-alpine as builder
 
 RUN apk --no-cache add build-base git bzr mercurial gcc linux-headers
-ENV D=/go/src/github.com/gochain-io/rpc-proxy
-RUN go get -u github.com/golang/dep/cmd/dep
-ADD Gopkg.* $D/
-RUN cd $D && dep ensure --vendor-only
+ENV D=/rpc-proxy
+WORKDIR $D
+# cache dependencies
+ADD go.mod $D
+ADD go.sum $D
+RUN go mod download
+# build
 ADD . $D
-RUN cd $D && go get && go build && cp rpc-proxy /tmp
+RUN cd $D && go build && cp rpc-proxy /tmp
 
 # Pull all binaries into a second stage deploy alpine container
 FROM alpine:latest

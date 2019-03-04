@@ -1,12 +1,10 @@
 version: 2
 jobs:
   build:
-    working_directory: ~/go/src/github.com/gochain-io/rpc-proxy
+    working_directory: /go/src/github.com/gochain-io/rpc-proxy
     docker:
       - image: circleci/golang:1.12
     environment: # apparently expansion doesn't work here yet: https://discuss.circleci.com/t/environment-variable-expansion-in-working-directory/11322
-      - GOPATH=/home/circleci/go
-      - GOVERSION=1.12
       - OS=linux
       - ARCH=amd64
       - GO111MODULE=on

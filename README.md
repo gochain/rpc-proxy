@@ -2,38 +2,47 @@
 
 [![CircleCI](https://circleci.com/gh/gochain-io/rpc-proxy/tree/master.svg?style=svg)](https://circleci.com/gh/gochain-io/rpc-proxy/tree/master)
 
+A proxy for `web3` JSONRPC featuring:
+ - rate limiting
+ - method filtering
+ - stats
+
 ## Getting Started
 
 ### Prerequisites
 
-Go Version 1.10+
-if not installed you can follow this documentation https://golang.org/doc/install
+At least Go 1.12. Installation documentation here: https://golang.org/doc/install
 
-## Deployment
+### How to Use
 
-You can run the program with the "port" and "url" sent as command line arguments. If not set by default rpc-proxy will be running on port 8545 and it will be redirecting the request to http://localhost:8080.
+By default, `rpc-proxy` will run on port `8545` and redirect requests to `http://localhost:8040`. These values
+can be changed with the `port` and `url` flags, along with other options: 
 
-Make sure you run your program at 8545 port or specify port while running the program.
+```sh
+> rpc-proxy help
+NAME:
+   rpc-proxy - A proxy for web3 JSONRPC
 
-Run Commands:
+USAGE:
+   rpc-proxy [global options] command [command options] [arguments...]
 
-If you want to host ReverseProxy on 8545 and redirect the request to the port 8040 , run following command
+VERSION:
+   0.0.28
 
-``` shell
-./rpc-proxy -url http://SOME_IP:8545 -allow "eth_*" -rpm 100
+COMMANDS:
+     help, h  Shows a list of commands or help for one command
+
+GLOBAL OPTIONS:
+   --config value, -c value   path to toml config file
+   --port value, -p value     port to serve (default: "8545")
+   --url value, -u value      redirect url (default: "http://127.0.0.1:8040")
+   --allow value, -a value    comma separated list of allowed paths
+   --rpm value                limit for number of requests per minute from single IP (default: 1000)
+   --nolimit value, -n value  list of ips allowed unlimited requests(separated by commas)
+   --verbose                  verbose logging enabled
+   --help, -h                 show help
+   --version, -v              print the version
 ```
-
-or
-
-``` shell
-./rpc-proxy
-```
-
-## Output
-
-When you run the rpc-proxy server, It will print the port where rpc-proxy is running and where it is redirecting the request to.
-
-Whenever there is a http request , we are printing request body and response body along with headers.Along with that we are measuring the time for each api. Currently we are storing the total response time, total no of api calls for a particular path.
 
 ## Docker
 
@@ -46,5 +55,5 @@ make build
 Run it:
 
 ```sh
-docker run --rm -it -p 8545:8545 gochain/rpc-proxy -url http://SOME_IP:8545 -allow "eth_*,net_*" -rpm 1000
+docker run --rm -it -p 8545:8545 gochain/rpc-proxy -url http://SOME_IP:8545 -port 8545 -allow "eth_*,net_*" -rpm 1000
 ```

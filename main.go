@@ -36,6 +36,10 @@ func main() {
 
 	app := cli.NewApp()
 
+	app.Name = "rpc-proxy"
+	app.Usage = "A proxy for web3 JSONRPC"
+	app.Version = Version
+
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
 			Name:        "config, c",
@@ -45,13 +49,13 @@ func main() {
 		cli.StringFlag{
 			Name:        "port, p",
 			Value:       "8545",
-			Usage:       "default server port, ':8545'",
+			Usage:       "port to serve",
 			Destination: &port,
 		},
 		cli.StringFlag{
 			Name:        "url, u",
 			Value:       "http://127.0.0.1:8040",
-			Usage:       "redirect url, default is http://127.0.0.1:8040",
+			Usage:       "redirect url",
 			Destination: &redirecturl,
 		},
 		cli.StringFlag{
@@ -62,7 +66,7 @@ func main() {
 		cli.IntFlag{
 			Name:        "rpm",
 			Value:       1000,
-			Usage:       "limit for number of requests per minute from single IP(default it 1000)",
+			Usage:       "limit for number of requests per minute from single IP",
 			Destination: &requestsPerMinuteLimit,
 		},
 		cli.StringFlag{

@@ -19,11 +19,11 @@ var requestsPerMinuteLimit int
 var verboseLogging bool
 
 type ConfigData struct {
-	Port    string
-	URL     string
-	Allow   []string
-	RPM     int
-	NoLimit []string
+	Port    string   `toml:",omitempty"`
+	URL     string   `toml:",omitempty"`
+	Allow   []string `toml:",omitempty"`
+	RPM     int      `toml:",omitempty"`
+	NoLimit []string `toml:",omitempty"`
 }
 
 func main() {

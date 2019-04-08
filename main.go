@@ -150,8 +150,20 @@ func main() {
 		}).Handler)
 
 		r.Get("/", server.HomePage)
+		r.Head("/", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
 		r.Get("/stats", server.Stats)
 		r.Get("/x/{method}", server.Example)
+		r.Head("/x/net_version", func(w http.ResponseWriter, r *http.Request) {
+			_, err := server.example("net_version")
+			if err != nil {
+				log.Printf("Failed to ping rpc: %v\n", err)
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		})
 		r.HandleFunc("/*", server.RPCProxy)
 		log.Fatal(http.ListenAndServe(":"+port, r))
 		return nil

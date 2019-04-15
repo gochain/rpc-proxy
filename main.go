@@ -155,6 +155,7 @@ func main() {
 		})
 		r.Get("/stats", server.Stats)
 		r.Get("/x/{method}", server.Example)
+		r.Get("/x/{method}/{param}", server.Example)
 		r.Head("/x/net_version", func(w http.ResponseWriter, r *http.Request) {
 			_, err := server.example("net_version")
 			if err != nil {

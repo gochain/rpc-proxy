@@ -3,16 +3,18 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/go-chi/chi"
+	"fmt"
 	"html/template"
 	"io"
 	"io/ioutil"
 	"log"
+	"math/big"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"sort"
 
+	"github.com/go-chi/chi"
 	"golang.org/x/time/rate"
 )
 
@@ -102,6 +104,7 @@ func (p *Server) Example(w http.ResponseWriter, r *http.Request) {
 
 		w.Write(data)
 	}
+	param := chi.URLParam(r, "param")
 	switch method {
 	case "clique_getSigners":
 		do("latest")
@@ -115,22 +118,50 @@ func (p *Server) Example(w http.ResponseWriter, r *http.Request) {
 		do()
 	case "eth_gasPrice":
 		do()
+	case "eth_genesisAlloc":
+		do()
 	case "eth_getBalance":
-		do("0x1234")
+		addr := "0x2c9c3FF339e1a38340987cd7fc5982Be7E39936d"
+		if param != "" {
+			addr = param
+		}
+		do(addr)
+	case "eth_getBlockByHash":
+		hash := "0x2c9c3FF339e1a38340987cd7fc5982Be7E39936d"
+		if param != "" {
+			hash = param
+		}
+		do(hash, false)
 	case "eth_getBlockByNumber":
-		do("latest", false)
-	//TODO fetch from url params
-	//case "eth_getTransaction":
-	//	do("0x0")
-	//case "eth_getTransactionCount":
-	//	do("0x0")
-	//case "eth_getTransactionReceipt":
-	//	do("0x0")
+		var num interface{} = "latest"
+		if param != "" {
+			i, ok := new(big.Int).SetString(param, 10)
+			if ok {
+				num = fmt.Sprintf("0x%X", i)
+			} else {
+				num = param
+			}
+		}
+		do(num, false)
+	case "eth_getTransactionCount":
+		hash := "0x2c9c3FF339e1a38340987cd7fc5982Be7E39936d"
+		if param != "" {
+			hash = param
+		}
+		do(hash, "latest")
+	case "eth_getTransactionByHash", "eth_getTransactionReceipt":
+		hash := "0x2c9c3FF339e1a38340987cd7fc5982Be7E39936d"
+		if param != "" {
+			hash = param
+		}
+		do(hash)
 	case "eth_totalSupply":
 		do("latest")
 	case "net_listening":
 		do()
 	case "net_version":
+		do()
+	case "rpc_modules":
 		do()
 
 	default:

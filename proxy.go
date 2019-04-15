@@ -125,7 +125,7 @@ func (p *Server) Example(w http.ResponseWriter, r *http.Request) {
 		if param != "" {
 			addr = param
 		}
-		do(addr)
+		do(addr, "latest")
 	case "eth_getBlockByHash":
 		hash := "0x2c9c3FF339e1a38340987cd7fc5982Be7E39936d"
 		if param != "" {

@@ -1,11 +1,12 @@
 # rpc-proxy
 
-[![CircleCI](https://circleci.com/gh/gochain-io/rpc-proxy/tree/master.svg?style=svg)](https://circleci.com/gh/gochain-io/rpc-proxy/tree/master)
+[![CircleCI](https://circleci.com/gh/gochain/rpc-proxy/tree/master.svg?style=svg)](https://circleci.com/gh/gochain/rpc-proxy/tree/master)
 
 A proxy for `web3` JSONRPC featuring:
- - rate limiting
- - method filtering
- - stats
+
+- rate limiting
+- method filtering
+- stats
 
 ## Getting Started
 
@@ -16,7 +17,7 @@ At least Go 1.12. Installation documentation here: https://golang.org/doc/instal
 ### How to Use
 
 By default, `rpc-proxy` will run on port `8545` and redirect requests to `http://localhost:8040`. These values
-can be changed with the `port` and `url` flags, along with other options: 
+can be changed with the `port` and `url` flags, along with other options:
 
 ```sh
 > rpc-proxy help

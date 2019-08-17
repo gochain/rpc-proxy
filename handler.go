@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"net"
 	"net/http"
 	"strings"
@@ -56,16 +57,16 @@ func getIP(r *http.Request) string {
 	return r.RemoteAddr
 }
 
-func parseRequests(r *http.Request) []ModifiedRequest {
-	var res []ModifiedRequest
-	ip := getIP(r)
+func parseRequests(r *http.Request) (body []byte, ip string, res []ModifiedRequest) {
+	ip = getIP(r)
 	if r.Body != nil {
-		bodyBytes, err := ioutil.ReadAll(r.Body)
+		var err error
+		body, err = ioutil.ReadAll(r.Body)
 		r.Body.Close() //closing reader
 		if err == nil {
-			if isBatch(bodyBytes) {
+			if isBatch(body) {
 				var arr []rpcRequest
-				err = json.Unmarshal(bodyBytes, &arr)
+				err = json.Unmarshal(body, &arr)
 				if err == nil {
 					for _, t := range arr {
 						res = append(res, ModifiedRequest{
@@ -79,7 +80,7 @@ func parseRequests(r *http.Request) []ModifiedRequest {
 				}
 			} else {
 				var t rpcRequest
-				err = json.Unmarshal(bodyBytes, &t)
+				err = json.Unmarshal(body, &t)
 				if err == nil {
 					res = append(res, ModifiedRequest{
 						ID:         t.ID,
@@ -93,7 +94,7 @@ func parseRequests(r *http.Request) []ModifiedRequest {
 		} else {
 			log.Println("cannot read body", "err", err.Error(), r)
 		}
-		r.Body = ioutil.NopCloser(bytes.NewBuffer(bodyBytes))
+		r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
 	}
 	if len(res) == 0 {
 		res = append(res, ModifiedRequest{
@@ -102,7 +103,7 @@ func parseRequests(r *http.Request) []ModifiedRequest {
 		})
 	}
 
-	return res
+	return
 }
 
 const (
@@ -150,26 +151,30 @@ func jsonRPCResponse(httpCode int, v interface{}) (*http.Response, error) {
 }
 
 func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	body, ip, parsedRequests := parseRequests(request)
+	id := rand.Int31()
+	if verboseLogging {
+		log.Println("Request: ", id, " from IP: ", ip, " Body: ", string(body))
+	}
 	start := time.Now()
-	parsedRequests := parseRequests(request)
 
 	for _, parsedRequest := range parsedRequests {
 		if !t.AllowLimit(parsedRequest) {
 			if verboseLogging {
-				log.Println("User hit the limit:", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
+				log.Println("Request: ", id, " User hit the limit:", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
 			}
 			return jsonRPCResponse(http.StatusTooManyRequests, jsonRPCLimit(parsedRequest.ID))
 		}
 
 		if !t.MatchAnyRule(parsedRequest) {
-			log.Println("Not allowed:", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
+			log.Println("Request: ", id, " Not allowed:", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
 			return jsonRPCResponse(http.StatusMethodNotAllowed, jsonRPCUnauthorized(parsedRequest.ID, parsedRequest.Path))
 		}
 	}
 	request.Host = request.RemoteAddr //workaround for CloudFlare
 	response, err := http.DefaultTransport.RoundTrip(request)
 	if err != nil {
-		log.Println("Error response from RoundTrip:", err)
+		log.Println("Request: ", id, "Error response from RoundTrip:", err)
 		returnErrorCode := http.StatusBadGateway
 		if response != nil {
 			returnErrorCode = response.StatusCode
@@ -178,12 +183,11 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	}
 
 	elapsed := time.Since(start)
-
+	if verboseLogging {
+		log.Println("Request: ", id, "Response Time:", elapsed.Seconds())
+	}
 	for _, parsedRequest := range parsedRequests {
 		t.updateStats(parsedRequest, elapsed)
-		if verboseLogging {
-			log.Println("Response Time:", elapsed.Seconds(), " path: ", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
-		}
 	}
 	return response, nil
 }

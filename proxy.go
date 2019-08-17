@@ -196,14 +196,20 @@ func (p *Server) example(method string, params ...interface{}) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-
+	
 	respBody, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
+	var formattedResp string
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		formattedResp = fmt.Sprintf("Code: %d (%s)\nBody: %s\n", resp.StatusCode, resp.Status, string(respBody))
+	} else {
+		formattedResp = indent(respBody)
+	}
 
 	var buf bytes.Buffer
-	if err := exampleTmpl.Execute(&buf, &exampleData{Method: method, Request: indent(body), Response: indent(respBody)}); err != nil {
+	if err := exampleTmpl.Execute(&buf, &exampleData{Method: method, Request: indent(body), Response: formattedResp}); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil

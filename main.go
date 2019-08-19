@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi"
-	"github.com/pelletier/go-toml"
+	toml "github.com/pelletier/go-toml"
 	"github.com/rs/cors"
 	"github.com/urfave/cli"
 )
@@ -19,11 +19,12 @@ var requestsPerMinuteLimit int
 var verboseLogging bool
 
 type ConfigData struct {
-	Port    string   `toml:",omitempty"`
-	URL     string   `toml:",omitempty"`
-	Allow   []string `toml:",omitempty"`
-	RPM     int      `toml:",omitempty"`
-	NoLimit []string `toml:",omitempty"`
+	Port            string   `toml:",omitempty"`
+	URL             string   `toml:",omitempty"`
+	Allow           []string `toml:",omitempty"`
+	RPM             int      `toml:",omitempty"`
+	NoLimit         []string `toml:",omitempty"`
+	BlockRangeLimit uint64   `toml:",omitempty"`
 }
 
 func main() {
@@ -33,6 +34,7 @@ func main() {
 	var redirecturl string
 	var allowedPaths string
 	var noLimitIPs string
+	var blockRangeLimit uint64
 
 	app := cli.NewApp()
 
@@ -73,6 +75,11 @@ func main() {
 			Name:        "nolimit, n",
 			Usage:       "list of ips allowed unlimited requests(separated by commas)",
 			Destination: &noLimitIPs,
+		},
+		cli.Uint64Flag{
+			Name:        "blocklimit, b",
+			Usage:       "block range query limit",
+			Destination: &blockRangeLimit,
 		},
 		cli.BoolFlag{
 			Name:        "verbose",
@@ -123,6 +130,12 @@ func main() {
 			}
 			cfg.NoLimit = strings.Split(noLimitIPs, ",")
 		}
+		if blockRangeLimit > 0 {
+			if cfg.BlockRangeLimit > 0 {
+				return errors.New("block range limit set in two places")
+			}
+			cfg.BlockRangeLimit = blockRangeLimit
+		}
 
 		sort.Strings(cfg.Allow)
 		sort.Strings(cfg.NoLimit)
@@ -134,7 +147,7 @@ func main() {
 		log.Println("List of allowed paths:", cfg.Allow)
 
 		// Create proxy server.
-		server, err := NewServer(redirecturl, cfg.Allow, cfg.NoLimit)
+		server, err := NewServer(cfg)
 		if err != nil {
 			return fmt.Errorf("failed to start server: %s", err)
 		}

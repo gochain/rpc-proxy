@@ -25,21 +25,23 @@ type Server struct {
 	homepage []byte
 }
 
-func NewServer(target string, allowedPaths []string, noLimitIPs []string) (*Server, error) {
-	url, err := url.Parse(target)
+func NewServer(cfg ConfigData) (*Server, error) {
+	url, err := url.Parse(cfg.URL)
 	if err != nil {
 		return nil, err
 	}
 
 	s := &Server{target: url, proxy: httputil.NewSingleHostReverseProxy(url)}
+	s.myTransport.blockRangeLimit = cfg.BlockRangeLimit
+	s.myTransport.url = cfg.URL
 	s.stats = make(map[string]MonitoringPath)
-	s.matcher, err = newMatcher(allowedPaths)
+	s.matcher, err = newMatcher(cfg.Allow)
 	if err != nil {
 		return nil, err
 	}
 	s.visitors = make(map[string]*rate.Limiter)
 	s.noLimitIPs = make(map[string]struct{})
-	for _, ip := range noLimitIPs {
+	for _, ip := range cfg.NoLimit {
 		s.noLimitIPs[ip] = struct{}{}
 	}
 	s.proxy.Transport = &s.myTransport
@@ -57,7 +59,7 @@ func NewServer(target string, allowedPaths []string, noLimitIPs []string) (*Serv
 
 	data := &homePageData{
 		Limit:                requestsPerMinuteLimit,
-		Methods:              allowedPaths,
+		Methods:              cfg.Allow,
 		ResponseRateLimit:    string(responseRateLimit),
 		ResponseUnauthorized: string(responseUnauthorized),
 	}
@@ -196,7 +198,7 @@ func (p *Server) example(method string, params ...interface{}) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	respBody, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err

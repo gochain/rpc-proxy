@@ -2,34 +2,40 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"log"
+	"math/big"
 	"math/rand"
 	"net"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gochain-io/gochain/v3/goclient"
+	"github.com/gochain-io/gochain/v3/rpc"
 )
 
 type myTransport struct {
+	blockRangeLimit uint64 // 0 means none
+
 	matcher
 	limiters
+
 	stats   map[string]MonitoringPath
 	statsMu sync.RWMutex
+
+	latestBlock
 }
 
 type ModifiedRequest struct {
 	Path       string
 	RemoteAddr string // Original IP, not CloudFlare or load balancer.
 	ID         json.RawMessage
-}
-
-//RPC request
-type rpcRequest struct {
-	Method string
-	ID     json.RawMessage `json:"id,omitempty"`
+	Params     []json.RawMessage
 }
 
 func isBatch(msg []byte) bool {
@@ -64,6 +70,11 @@ func parseRequests(r *http.Request) (body []byte, ip string, res []ModifiedReque
 		body, err = ioutil.ReadAll(r.Body)
 		r.Body.Close() //closing reader
 		if err == nil {
+			type rpcRequest struct {
+				ID     json.RawMessage   `json:"id"`
+				Method string            `json:"method"`
+				Params []json.RawMessage `json:"params"`
+			}
 			if isBatch(body) {
 				var arr []rpcRequest
 				err = json.Unmarshal(body, &arr)
@@ -73,6 +84,7 @@ func parseRequests(r *http.Request) (body []byte, ip string, res []ModifiedReque
 							ID:         t.ID,
 							Path:       t.Method,
 							RemoteAddr: ip,
+							Params:     t.Params,
 						})
 					}
 				} else {
@@ -86,6 +98,7 @@ func parseRequests(r *http.Request) (body []byte, ip string, res []ModifiedReque
 						ID:         t.ID,
 						Path:       t.Method,
 						RemoteAddr: ip,
+						Params:     t.Params,
 					})
 				} else {
 					log.Println("cannot parse JSON single request", "err", err.Error(), r)
@@ -107,9 +120,10 @@ func parseRequests(r *http.Request) (body []byte, ip string, res []ModifiedReque
 }
 
 const (
-	jsonRPCTimeout     = -32000
-	jsonRPCUnavailable = -32601
-	jsonRPCInternal    = -32603
+	jsonRPCTimeout       = -32000
+	jsonRPCUnavailable   = -32601
+	jsonRPCInvalidParams = -32602
+	jsonRPCInternal      = -32603
 )
 
 func jsonRPCError(id json.RawMessage, jsonCode int, msg string) interface{} {
@@ -138,6 +152,10 @@ func jsonRPCLimit(id json.RawMessage) interface{} {
 	return jsonRPCError(id, jsonRPCTimeout, "You hit the request limit")
 }
 
+func jsonRPCBlockRangeLimit(id json.RawMessage, blocks, limit uint64) interface{} {
+	return jsonRPCError(id, jsonRPCInvalidParams, fmt.Sprintf("Requested range of blocks (%d) is larger than limit (%d).", blocks, limit))
+}
+
 func jsonRPCResponse(httpCode int, v interface{}) (*http.Response, error) {
 	body, err := json.Marshal(v)
 	if err != nil {
@@ -158,6 +176,7 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	}
 	start := time.Now()
 
+	var union *blockRange
 	for _, parsedRequest := range parsedRequests {
 		if !t.AllowLimit(parsedRequest) {
 			if verboseLogging {
@@ -169,6 +188,29 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 		if !t.MatchAnyRule(parsedRequest) {
 			log.Println("Request: ", id, " Not allowed:", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
 			return jsonRPCResponse(http.StatusMethodNotAllowed, jsonRPCUnauthorized(parsedRequest.ID, parsedRequest.Path))
+		}
+		if t.blockRangeLimit > 0 && parsedRequest.Path == "eth_getLogs" {
+			r, invalid, err := t.parseRange(request.Context(), parsedRequest)
+			if err != nil {
+				return jsonRPCResponse(http.StatusInternalServerError, jsonRPCError(parsedRequest.ID, jsonRPCInternal, err.Error()))
+			} else if invalid != nil {
+				return jsonRPCResponse(http.StatusBadRequest, jsonRPCError(parsedRequest.ID, jsonRPCInvalidParams, invalid.Error()))
+			}
+			if r != nil {
+				if l := r.len(); l > t.blockRangeLimit {
+					// This request exceeds the block range limit.
+					return jsonRPCResponse(http.StatusBadRequest, jsonRPCBlockRangeLimit(parsedRequest.ID, l, t.blockRangeLimit))
+				}
+				if union == nil {
+					union = r
+				} else {
+					union.extend(r)
+					if l := union.len(); l > t.blockRangeLimit {
+						// The union of the ranges so far exceeds the block range limit.
+						return jsonRPCResponse(http.StatusBadRequest, jsonRPCBlockRangeLimit(parsedRequest.ID, l, t.blockRangeLimit))
+					}
+				}
+			}
 		}
 	}
 	request.Host = request.RemoteAddr //workaround for CloudFlare
@@ -190,4 +232,154 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 		t.updateStats(parsedRequest, elapsed)
 	}
 	return response, nil
+}
+
+type blockRange struct{ start, end uint64 }
+
+func (b blockRange) len() uint64 {
+	return b.end - b.start + 1
+}
+
+func (b *blockRange) extend(b2 *blockRange) {
+	if b2.start < b.start {
+		b.start = b2.start
+	}
+	if b2.end > b.end {
+		b.end = b2.end
+	}
+}
+
+// parseRange returns a block range if one exists, or an error if the request is invalid.
+func (t *myTransport) parseRange(ctx context.Context, request ModifiedRequest) (r *blockRange, invalid, internal error) {
+	if len(request.Params) == 0 {
+		return nil, nil, nil
+	}
+	type filterQuery struct {
+		BlockHash *string          `json:"blockHash"`
+		FromBlock *rpc.BlockNumber `json:"fromBlock"`
+		ToBlock   *rpc.BlockNumber `json:"toBlock"`
+	}
+	var fq filterQuery
+	err := json.Unmarshal(request.Params[0], &fq)
+	if err != nil {
+		return nil, err, nil
+	}
+	if fq.BlockHash != nil {
+		return nil, nil, nil
+	}
+	var start, end uint64
+	if fq.FromBlock != nil {
+		switch *fq.FromBlock {
+		case rpc.LatestBlockNumber, rpc.PendingBlockNumber:
+			l, err := t.latestBlock.get(ctx)
+			if err != nil {
+				return nil, nil, err
+			}
+			start = l
+		default:
+			start = uint64(*fq.FromBlock)
+		}
+	}
+	if fq.ToBlock == nil {
+		l, err := t.latestBlock.get(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		end = l
+	} else {
+		switch *fq.ToBlock {
+		case rpc.LatestBlockNumber, rpc.PendingBlockNumber:
+			l, err := t.latestBlock.get(ctx)
+			if err != nil {
+				return nil, nil, err
+			}
+			end = l
+		default:
+			end = uint64(*fq.ToBlock)
+		}
+	}
+
+	return &blockRange{start: start, end: end}, nil, nil
+}
+
+type latestBlock struct {
+	url    string
+	client *goclient.Client
+
+	mu sync.RWMutex // Protects everything below.
+
+	next chan struct{} // Set when an update is running, and closed when the next result is available.
+
+	num uint64
+	err error
+	at  *time.Time // When num and err were set.
+}
+
+func (l *latestBlock) get(ctx context.Context) (uint64, error) {
+	l.mu.RLock()
+	next, num, err, at := l.next, l.num, l.err, l.at
+	l.mu.RUnlock()
+	if at != nil && time.Since(*at) < 5*time.Second {
+		return num, err
+	}
+	if next == nil {
+		// No update in progress, so try to trigger one.
+		next, num, err = l.update()
+	}
+	if next != nil {
+		// Wait on update to complete.
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		case <-next:
+		}
+		l.mu.RLock()
+		num = l.num
+		err = l.err
+		l.mu.RUnlock()
+	}
+
+	return num, err
+
+}
+
+// update updates (num, err, at). Only one instance may run at a time, and it
+// spot is reserved by setting next, which is closed when the operation completes.
+// Returns a chan to wait on if another instance is already running. Otherwise
+// returns num and err if the operation is complete.
+func (l *latestBlock) update() (chan struct{}, uint64, error) {
+	l.mu.Lock()
+	if next := l.next; next != nil {
+		// Someone beat us to it, return their next chan.
+		l.mu.Unlock()
+		return next, 0, nil
+	}
+	next := make(chan struct{})
+	l.next = next
+	l.mu.Unlock()
+
+	var latest uint64
+	var err error
+	if l.client == nil {
+		l.client, err = goclient.Dial(l.url)
+	}
+	if err == nil {
+		var lBig *big.Int
+		lBig, err = l.client.LatestBlockNumber(context.Background())
+		if err == nil {
+			latest = lBig.Uint64()
+		}
+	}
+	now := time.Now()
+
+	l.mu.Lock()
+	l.num = latest
+	l.err = err
+	l.at = &now
+	l.next = nil
+	l.mu.Unlock()
+
+	close(next)
+
+	return nil, latest, err
 }

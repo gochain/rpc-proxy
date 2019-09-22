@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"log"
 	"sync"
 	"time"
 
@@ -15,37 +13,33 @@ type limiters struct {
 	sync.RWMutex
 }
 
-func (ls *limiters) tryAddVisitor(ip string) *rate.Limiter {
+func (ls *limiters) tryAddVisitor(ip string) (*rate.Limiter, bool) {
 	ls.Lock()
 	defer ls.Unlock()
 	limiter, exists := ls.visitors[ip]
 	if exists {
-		return limiter
+		return limiter, false
 	}
 	limit := rate.Every(time.Minute / time.Duration(requestsPerMinuteLimit))
 	limiter = rate.NewLimiter(limit, requestsPerMinuteLimit/10)
-	log.Println("Added new visitor:", ip, " limit ", fmt.Sprint(requestsPerMinuteLimit))
 	ls.visitors[ip] = limiter
-	return limiter
+	return limiter, true
 }
 
-func (ls *limiters) getVisitor(ip string) *rate.Limiter {
+func (ls *limiters) getVisitor(ip string) (*rate.Limiter, bool) {
 	ls.RLock()
 	limiter, exists := ls.visitors[ip]
 	ls.RUnlock()
 	if !exists {
 		return ls.tryAddVisitor(ip)
 	}
-	return limiter
+	return limiter, false
 }
 
-func (ls *limiters) AllowLimit(r ModifiedRequest) bool {
+func (ls *limiters) AllowVisitor(r ModifiedRequest) (allowed, added bool) {
 	if _, ok := ls.noLimitIPs[r.RemoteAddr]; ok {
-		return true
+		return true, false
 	}
-	limiter := ls.getVisitor(r.RemoteAddr)
-	if limiter.Allow() == false {
-		return false
-	}
-	return true
+	limiter, added := ls.getVisitor(r.RemoteAddr)
+	return limiter.Allow(), added
 }

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"math/big"
 	"math/rand"
 	"net"
@@ -15,11 +14,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/blendle/zapdriver"
+
+	"go.uber.org/zap"
+
 	"github.com/gochain-io/gochain/v3/goclient"
 	"github.com/gochain-io/gochain/v3/rpc"
 )
 
 type myTransport struct {
+	lgr             *zap.Logger
 	blockRangeLimit uint64 // 0 means none
 
 	matcher
@@ -63,49 +67,46 @@ func getIP(r *http.Request) string {
 	return r.RemoteAddr
 }
 
-func parseRequests(r *http.Request) (body []byte, ip string, res []ModifiedRequest) {
-	ip = getIP(r)
+func parseRequests(r *http.Request) ([]ModifiedRequest, error) {
+	var res []ModifiedRequest
+	ip := getIP(r)
 	if r.Body != nil {
-		var err error
-		body, err = ioutil.ReadAll(r.Body)
+		body, err := ioutil.ReadAll(r.Body)
 		r.Body.Close() //closing reader
-		if err == nil {
-			type rpcRequest struct {
-				ID     json.RawMessage   `json:"id"`
-				Method string            `json:"method"`
-				Params []json.RawMessage `json:"params"`
+		if err != nil {
+			return nil, fmt.Errorf("failed to read body: %v", err)
+		}
+		type rpcRequest struct {
+			ID     json.RawMessage   `json:"id"`
+			Method string            `json:"method"`
+			Params []json.RawMessage `json:"params"`
+		}
+		if isBatch(body) {
+			var arr []rpcRequest
+			err = json.Unmarshal(body, &arr)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse JSON batch request: %v", err)
 			}
-			if isBatch(body) {
-				var arr []rpcRequest
-				err = json.Unmarshal(body, &arr)
-				if err == nil {
-					for _, t := range arr {
-						res = append(res, ModifiedRequest{
-							ID:         t.ID,
-							Path:       t.Method,
-							RemoteAddr: ip,
-							Params:     t.Params,
-						})
-					}
-				} else {
-					log.Println("cannot parse JSON batch request", "err", err.Error(), r)
-				}
-			} else {
-				var t rpcRequest
-				err = json.Unmarshal(body, &t)
-				if err == nil {
-					res = append(res, ModifiedRequest{
-						ID:         t.ID,
-						Path:       t.Method,
-						RemoteAddr: ip,
-						Params:     t.Params,
-					})
-				} else {
-					log.Println("cannot parse JSON single request", "err", err.Error(), r)
-				}
+			for _, t := range arr {
+				res = append(res, ModifiedRequest{
+					ID:         t.ID,
+					Path:       t.Method,
+					RemoteAddr: ip,
+					Params:     t.Params,
+				})
 			}
 		} else {
-			log.Println("cannot read body", "err", err.Error(), r)
+			var t rpcRequest
+			err = json.Unmarshal(body, &t)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse JSON request: %v", err)
+			}
+			res = append(res, ModifiedRequest{
+				ID:         t.ID,
+				Path:       t.Method,
+				RemoteAddr: ip,
+				Params:     t.Params,
+			})
 		}
 		r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
 	}
@@ -115,8 +116,7 @@ func parseRequests(r *http.Request) (body []byte, ip string, res []ModifiedReque
 			RemoteAddr: ip,
 		})
 	}
-
-	return
+	return res, nil
 }
 
 const (
@@ -159,8 +159,7 @@ func jsonRPCBlockRangeLimit(id json.RawMessage, blocks, limit uint64) interface{
 func jsonRPCResponse(httpCode int, v interface{}) (*http.Response, error) {
 	body, err := json.Marshal(v)
 	if err != nil {
-		log.Println("Failed to serialize JSON RPC error:", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to serialize JSON: %v", err)
 	}
 	return &http.Response{
 		Body:       ioutil.NopCloser(bytes.NewReader(body)),
@@ -169,37 +168,69 @@ func jsonRPCResponse(httpCode int, v interface{}) (*http.Response, error) {
 }
 
 func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	body, ip, parsedRequests := parseRequests(request)
+	parsedRequests, err := parseRequests(request)
+	if err != nil {
+		t.lgr.Error("Failed to parse requests", zap.Error(err))
+		return nil, err
+	}
 	id := rand.Int31()
+	lgr := t.lgr.With(zap.Int32("id", id))
 	if verboseLogging {
-		log.Println("Request: ", id, " from IP: ", ip, " Body: ", string(body))
+		lgr.Info("Request", zapdriver.HTTP(zapdriver.NewHTTP(request, nil)))
 	}
 	start := time.Now()
 
 	var union *blockRange
 	for _, parsedRequest := range parsedRequests {
-		if !t.AllowLimit(parsedRequest) {
+		if allowed, added := t.AllowVisitor(parsedRequest); !allowed {
 			if verboseLogging {
-				log.Println("Request: ", id, " User hit the limit:", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
+				lgr.Info("IP is rate-limited", zap.String("ip", parsedRequest.RemoteAddr))
 			}
-			return jsonRPCResponse(http.StatusTooManyRequests, jsonRPCLimit(parsedRequest.ID))
+			resp, err := jsonRPCResponse(http.StatusTooManyRequests, jsonRPCLimit(parsedRequest.ID))
+			if err != nil {
+				lgr.Error("Failed to construct rate-limit response", zap.Error(err))
+				return nil, err
+			}
+			return resp, nil
+		} else if added {
+			lgr.Info("Added new visitor", zap.String("ip", parsedRequest.RemoteAddr))
 		}
 
 		if !t.MatchAnyRule(parsedRequest) {
-			log.Println("Request: ", id, " Not allowed:", parsedRequest.Path, " from IP: ", parsedRequest.RemoteAddr)
-			return jsonRPCResponse(http.StatusMethodNotAllowed, jsonRPCUnauthorized(parsedRequest.ID, parsedRequest.Path))
+			lgr.Info("Method not allowed", zap.String("ip", parsedRequest.RemoteAddr))
+			resp, err := jsonRPCResponse(http.StatusMethodNotAllowed, jsonRPCUnauthorized(parsedRequest.ID, parsedRequest.Path))
+			if err != nil {
+				lgr.Error("Failed to construct not-allowed response", zap.Error(err))
+				return nil, err
+			}
+			return resp, nil
 		}
 		if t.blockRangeLimit > 0 && parsedRequest.Path == "eth_getLogs" {
 			r, invalid, err := t.parseRange(request.Context(), parsedRequest)
 			if err != nil {
-				return jsonRPCResponse(http.StatusInternalServerError, jsonRPCError(parsedRequest.ID, jsonRPCInternal, err.Error()))
+				resp, err := jsonRPCResponse(http.StatusInternalServerError, jsonRPCError(parsedRequest.ID, jsonRPCInternal, err.Error()))
+				if err != nil {
+					lgr.Error("Failed to construct internal error response", zap.Error(err))
+					return nil, err
+				}
+				return resp, nil
 			} else if invalid != nil {
-				return jsonRPCResponse(http.StatusBadRequest, jsonRPCError(parsedRequest.ID, jsonRPCInvalidParams, invalid.Error()))
+				resp, err := jsonRPCResponse(http.StatusBadRequest, jsonRPCError(parsedRequest.ID, jsonRPCInvalidParams, invalid.Error()))
+				if err != nil {
+					lgr.Error("Failed to construct invalid params response", zap.Error(err))
+					return nil, err
+				}
+				return resp, nil
 			}
 			if r != nil {
 				if l := r.len(); l > t.blockRangeLimit {
 					// This request exceeds the block range limit.
-					return jsonRPCResponse(http.StatusBadRequest, jsonRPCBlockRangeLimit(parsedRequest.ID, l, t.blockRangeLimit))
+					resp, err := jsonRPCResponse(http.StatusBadRequest, jsonRPCBlockRangeLimit(parsedRequest.ID, l, t.blockRangeLimit))
+					if err != nil {
+						lgr.Error("Failed to construct block range limit response", zap.Error(err))
+						return nil, err
+					}
+					return resp, nil
 				}
 				if union == nil {
 					union = r
@@ -207,7 +238,12 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 					union.extend(r)
 					if l := union.len(); l > t.blockRangeLimit {
 						// The union of the ranges so far exceeds the block range limit.
-						return jsonRPCResponse(http.StatusBadRequest, jsonRPCBlockRangeLimit(parsedRequest.ID, l, t.blockRangeLimit))
+						resp, err := jsonRPCResponse(http.StatusBadRequest, jsonRPCBlockRangeLimit(parsedRequest.ID, l, t.blockRangeLimit))
+						if err != nil {
+							lgr.Error("Failed to construct block range limit response", zap.Error(err))
+							return nil, err
+						}
+						return resp, nil
 					}
 				}
 			}
@@ -216,7 +252,7 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	request.Host = request.RemoteAddr //workaround for CloudFlare
 	response, err := http.DefaultTransport.RoundTrip(request)
 	if err != nil {
-		log.Println("Request: ", id, "Error response from RoundTrip:", err)
+		lgr.Error("RoundTrip error", zap.Error(err))
 		returnErrorCode := http.StatusBadGateway
 		if response != nil {
 			returnErrorCode = response.StatusCode
@@ -226,7 +262,7 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 
 	elapsed := time.Since(start)
 	if verboseLogging {
-		log.Println("Request: ", id, "Response Time:", elapsed.Seconds())
+		lgr.Info("Request completed", zap.Duration("runtime", elapsed))
 	}
 	for _, parsedRequest := range parsedRequests {
 		t.updateStats(parsedRequest, elapsed)

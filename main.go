@@ -3,12 +3,15 @@ package main
 import (
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"sort"
 	"strings"
+	"time"
 
+	"go.uber.org/zap"
+
+	"github.com/blendle/zapdriver"
 	"github.com/go-chi/chi"
 	toml "github.com/pelletier/go-toml"
 	"github.com/rs/cors"
@@ -28,6 +31,12 @@ type ConfigData struct {
 }
 
 func main() {
+	start := time.Now()
+	lgr, err := zapdriver.NewProduction()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create logger: %v\n", err)
+		os.Exit(1)
+	}
 
 	var configPath string
 	var port string
@@ -37,7 +46,6 @@ func main() {
 	var blockRangeLimit uint64
 
 	app := cli.NewApp()
-
 	app.Name = "rpc-proxy"
 	app.Usage = "A proxy for web3 JSONRPC"
 	app.Version = Version
@@ -137,54 +145,54 @@ func main() {
 			cfg.BlockRangeLimit = blockRangeLimit
 		}
 
-		sort.Strings(cfg.Allow)
-		sort.Strings(cfg.NoLimit)
-
-		log.Println("Server will run on port:", cfg.Port)
-		log.Println("Redirecting to url:", cfg.URL)
-		log.Println("Requests-per-minute for each IP limited to:", cfg.RPM)
-		log.Println("List of IPs exempt from the limit:", cfg.NoLimit)
-		log.Println("List of allowed paths:", cfg.Allow)
-
-		// Create proxy server.
-		server, err := NewServer(cfg)
-		if err != nil {
-			return fmt.Errorf("failed to start server: %s", err)
-		}
-
-		r := chi.NewRouter()
-		// Use default options
-		r.Use(cors.New(cors.Options{
-			AllowedOrigins:   []string{"*"},
-			AllowedMethods:   []string{"HEAD", "GET", "POST", "PUT", "PATCH", "DELETE"},
-			AllowedHeaders:   []string{"*"},
-			AllowCredentials: false,
-			MaxAge:           3600,
-		}).Handler)
-
-		r.Get("/", server.HomePage)
-		r.Head("/", func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		})
-		r.Get("/stats", server.Stats)
-		r.Get("/x/{method}", server.Example)
-		r.Get("/x/{method}/{param}", server.Example)
-		r.Head("/x/net_version", func(w http.ResponseWriter, r *http.Request) {
-			_, err := server.example("net_version")
-			if err != nil {
-				log.Printf("Failed to ping rpc: %v\n", err)
-				w.WriteHeader(http.StatusInternalServerError)
-				return
-			}
-			w.WriteHeader(http.StatusOK)
-		})
-		r.HandleFunc("/*", server.RPCProxy)
-		log.Fatal(http.ListenAndServe(":"+port, r))
-		return nil
+		return cfg.run(lgr)
 	}
 
-	err := app.Run(os.Args)
+	if err := app.Run(os.Args); err != nil {
+		lgr.Fatal("Fatal error", zap.Error(err), zap.Duration("runtime", time.Since(start)))
+	}
+	lgr.Info("Shutting down", zap.Duration("runtime", time.Since(start)))
+}
+
+func (cfg *ConfigData) run(lgr *zap.Logger) error {
+	sort.Strings(cfg.Allow)
+	sort.Strings(cfg.NoLimit)
+
+	lgr.Info("Server starting", zap.String("port", cfg.Port), zap.String("redirectURL", cfg.URL),
+		zap.Int("rpmLimit", cfg.RPM), zap.Strings("exempt", cfg.NoLimit), zap.Strings("allowed", cfg.Allow))
+
+	// Create proxy server.
+	server, err := cfg.NewServer(lgr)
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("failed to start server: %s", err)
 	}
+
+	r := chi.NewRouter()
+	// Use default options
+	r.Use(cors.New(cors.Options{
+		AllowedOrigins:   []string{"*"},
+		AllowedMethods:   []string{"HEAD", "GET", "POST", "PUT", "PATCH", "DELETE"},
+		AllowedHeaders:   []string{"*"},
+		AllowCredentials: false,
+		MaxAge:           3600,
+	}).Handler)
+
+	r.Get("/", server.HomePage)
+	r.Head("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	r.Get("/stats", server.Stats)
+	r.Get("/x/{method}", server.Example)
+	r.Get("/x/{method}/{param}", server.Example)
+	r.Head("/x/net_version", func(w http.ResponseWriter, r *http.Request) {
+		_, err := server.example("net_version")
+		if err != nil {
+			lgr.Error("Failed to ping RPC", zap.Error(err))
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+	r.HandleFunc("/*", server.RPCProxy)
+	return http.ListenAndServe(":"+cfg.Port, r)
 }

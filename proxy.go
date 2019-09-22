@@ -7,12 +7,13 @@ import (
 	"html/template"
 	"io"
 	"io/ioutil"
-	"log"
 	"math/big"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"sort"
+
+	"go.uber.org/zap"
 
 	"github.com/go-chi/chi"
 	"golang.org/x/time/rate"
@@ -20,18 +21,20 @@ import (
 
 type Server struct {
 	target *url.URL
+	lgr    *zap.Logger
 	proxy  *httputil.ReverseProxy
 	myTransport
 	homepage []byte
 }
 
-func NewServer(cfg ConfigData) (*Server, error) {
+func (cfg *ConfigData) NewServer(lgr *zap.Logger) (*Server, error) {
 	url, err := url.Parse(cfg.URL)
 	if err != nil {
 		return nil, err
 	}
 
-	s := &Server{target: url, proxy: httputil.NewSingleHostReverseProxy(url)}
+	s := &Server{target: url, lgr: lgr, proxy: httputil.NewSingleHostReverseProxy(url)}
+	s.myTransport.lgr = lgr
 	s.myTransport.blockRangeLimit = cfg.BlockRangeLimit
 	s.myTransport.url = cfg.URL
 	s.stats = make(map[string]MonitoringPath)
@@ -76,7 +79,8 @@ func NewServer(cfg ConfigData) (*Server, error) {
 
 func (p *Server) HomePage(w http.ResponseWriter, r *http.Request) {
 	if _, err := io.Copy(w, bytes.NewReader(p.homepage)); err != nil {
-		log.Printf("Failed to return homepage: %s", err)
+		p.lgr.Error("Failed to serve homepage", zap.Error(err))
+		return
 	}
 }
 
@@ -89,7 +93,7 @@ func (p *Server) Stats(w http.ResponseWriter, r *http.Request) {
 	stats, err := p.getStats()
 	if err != nil {
 		http.Error(w, "failed to get stats", http.StatusInternalServerError)
-		log.Println("Failed to get server stats:", err)
+		p.lgr.Error("Failed to serve stats", zap.Error(err))
 	} else {
 		w.Write(stats)
 	}

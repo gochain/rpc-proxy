@@ -173,23 +173,50 @@ func jsonRPCResponse(httpCode int, v interface{}) (*http.Response, error) {
 	}, nil
 }
 
-func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	parsedRequests, err := parseRequests(request)
-	if err != nil {
-		t.lgr.Error("Failed to parse requests", zap.Error(err))
-		resp, err := jsonRPCResponse(http.StatusBadRequest, jsonRPCError(json.RawMessage{}, jsonRPCInvalidParams, err.Error()))
-		if err != nil {
-			t.lgr.Error("Failed to construct invalid params response", zap.Error(err))
-		}
-		return resp, nil
-	}
+func (t *myTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	id := rand.Int31()
 	lgr := t.lgr.With(zap.Int32("id", id))
 	if verboseLogging {
-		lgr.Info("Request", zapdriver.HTTP(NewHTTP(request, nil)))
+		lgr.Info("Request", zapdriver.HTTP(NewHTTP(req, nil)))
 	}
 	start := time.Now()
 
+	parsedRequests, err := parseRequests(req)
+	if err != nil {
+		lgr.Error("Failed to parse requests", zap.Error(err))
+		resp, err := jsonRPCResponse(http.StatusBadRequest, jsonRPCError(json.RawMessage{}, jsonRPCInvalidParams, err.Error()))
+		if err != nil {
+			lgr.Error("Failed to construct invalid params response", zap.Error(err))
+		}
+		return resp, nil
+	}
+
+	if blockResponse := t.block(req.Context(), lgr, parsedRequests); blockResponse != nil {
+		if verboseLogging {
+			lgr.Info("Request blocked", zapdriver.HTTP(NewHTTP(nil, blockResponse)))
+		}
+		return blockResponse, nil
+	}
+	req.Host = req.RemoteAddr //workaround for CloudFlare
+	res, err := http.DefaultTransport.RoundTrip(req)
+	elapsed := time.Since(start)
+	lgr = lgr.With(zap.Duration("runtime", elapsed))
+	if err != nil {
+		lgr.Error("RoundTrip error", zap.Error(err), zapdriver.HTTP(NewHTTP(nil, res)))
+		return res, err
+	}
+
+	if verboseLogging {
+		lgr.Info("Request completed", zapdriver.HTTP(NewHTTP(nil, res)))
+	}
+	for _, parsedRequest := range parsedRequests {
+		t.updateStats(parsedRequest, elapsed)
+	}
+	return res, nil
+}
+
+// block returns a response only if the request should be blocked, otherwise it returns nil if allowed.
+func (t *myTransport) block(ctx context.Context, lgr *zap.Logger, parsedRequests []ModifiedRequest) *http.Response {
 	var union *blockRange
 	for _, parsedRequest := range parsedRequests {
 		if allowed, added := t.AllowVisitor(parsedRequest); !allowed {
@@ -200,7 +227,7 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 			if err != nil {
 				lgr.Error("Failed to construct rate-limit response", zap.Error(err))
 			}
-			return resp, nil
+			return resp
 		} else if added {
 			lgr.Info("Added new visitor", zap.String("ip", parsedRequest.RemoteAddr))
 		}
@@ -211,22 +238,22 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 			if err != nil {
 				lgr.Error("Failed to construct not-allowed response", zap.Error(err))
 			}
-			return resp, nil
+			return resp
 		}
 		if t.blockRangeLimit > 0 && parsedRequest.Path == "eth_getLogs" {
-			r, invalid, err := t.parseRange(request.Context(), parsedRequest)
+			r, invalid, err := t.parseRange(ctx, parsedRequest)
 			if err != nil {
 				resp, err := jsonRPCResponse(http.StatusInternalServerError, jsonRPCError(parsedRequest.ID, jsonRPCInternal, err.Error()))
 				if err != nil {
 					lgr.Error("Failed to construct internal error response", zap.Error(err))
 				}
-				return resp, nil
+				return resp
 			} else if invalid != nil {
 				resp, err := jsonRPCResponse(http.StatusBadRequest, jsonRPCError(parsedRequest.ID, jsonRPCInvalidParams, invalid.Error()))
 				if err != nil {
 					lgr.Error("Failed to construct invalid params response", zap.Error(err))
 				}
-				return resp, nil
+				return resp
 			}
 			if r != nil {
 				if l := r.len(); l > t.blockRangeLimit {
@@ -235,7 +262,7 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 					if err != nil {
 						lgr.Error("Failed to construct block range limit response", zap.Error(err))
 					}
-					return resp, nil
+					return resp
 				}
 				if union == nil {
 					union = r
@@ -247,28 +274,13 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 						if err != nil {
 							lgr.Error("Failed to construct block range limit response", zap.Error(err))
 						}
-						return resp, nil
+						return resp
 					}
 				}
 			}
 		}
 	}
-	request.Host = request.RemoteAddr //workaround for CloudFlare
-	response, err := http.DefaultTransport.RoundTrip(request)
-	elapsed := time.Since(start)
-	lgr = lgr.With(zap.Duration("runtime", elapsed))
-	if err != nil {
-		lgr.Error("RoundTrip error", zap.Error(err))
-		return response, err
-	}
-
-	if verboseLogging {
-		lgr.Info("Request completed")
-	}
-	for _, parsedRequest := range parsedRequests {
-		t.updateStats(parsedRequest, elapsed)
-	}
-	return response, nil
+	return nil
 }
 
 type blockRange struct{ start, end uint64 }
@@ -429,7 +441,6 @@ func NewHTTP(req *http.Request, res *http.Response) *zapdriver.HTTPPayload {
 	if req != nil {
 		p = zapdriver.HTTPPayload{
 			RequestMethod: req.Method,
-			Status:        res.StatusCode,
 			UserAgent:     req.UserAgent(),
 			RemoteIP:      req.RemoteAddr,
 			Referer:       req.Referer(),
@@ -443,6 +454,7 @@ func NewHTTP(req *http.Request, res *http.Response) *zapdriver.HTTPPayload {
 
 	if res != nil {
 		p.ResponseSize = strconv.FormatInt(res.ContentLength, 10)
+		p.Status = res.StatusCode
 	}
 
 	return &p

@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -176,7 +177,7 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	id := rand.Int31()
 	lgr := t.lgr.With(zap.Int32("id", id))
 	if verboseLogging {
-		lgr.Info("Request", zapdriver.HTTP(zapdriver.NewHTTP(request, nil)))
+		lgr.Info("Request", zapdriver.HTTP(NewHTTP(request, nil)))
 	}
 	start := time.Now()
 
@@ -418,4 +419,31 @@ func (l *latestBlock) update() (chan struct{}, uint64, error) {
 	close(next)
 
 	return nil, latest, err
+}
+
+// NewHTTP returns a new HTTPPayload struct, based on the passed
+// in http.Request and http.Response objects. They are not modified
+// in any way, unlike the zapdriver version this is based on.
+func NewHTTP(req *http.Request, res *http.Response) *zapdriver.HTTPPayload {
+	var p zapdriver.HTTPPayload
+	if req != nil {
+		p = zapdriver.HTTPPayload{
+			RequestMethod: req.Method,
+			Status:        res.StatusCode,
+			UserAgent:     req.UserAgent(),
+			RemoteIP:      req.RemoteAddr,
+			Referer:       req.Referer(),
+			Protocol:      req.Proto,
+			RequestSize:   strconv.FormatInt(req.ContentLength, 10),
+		}
+		if req.URL != nil {
+			p.RequestURL = req.URL.String()
+		}
+	}
+
+	if res != nil {
+		p.ResponseSize = strconv.FormatInt(res.ContentLength, 10)
+	}
+
+	return &p
 }

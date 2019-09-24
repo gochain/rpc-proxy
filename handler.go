@@ -157,10 +157,15 @@ func jsonRPCBlockRangeLimit(id json.RawMessage, blocks, limit uint64) interface{
 	return jsonRPCError(id, jsonRPCInvalidParams, fmt.Sprintf("Requested range of blocks (%d) is larger than limit (%d).", blocks, limit))
 }
 
+// jsonRPCResponse returns a JSON response containing v, or a plaintext generic
+// response for this httpCode and an error when JSON marshalling fails.
 func jsonRPCResponse(httpCode int, v interface{}) (*http.Response, error) {
 	body, err := json.Marshal(v)
 	if err != nil {
-		return nil, fmt.Errorf("failed to serialize JSON: %v", err)
+		return &http.Response{
+			Body:       ioutil.NopCloser(strings.NewReader(http.StatusText(httpCode))),
+			StatusCode: httpCode,
+		}, fmt.Errorf("failed to serialize JSON: %v", err)
 	}
 	return &http.Response{
 		Body:       ioutil.NopCloser(bytes.NewReader(body)),
@@ -172,7 +177,11 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	parsedRequests, err := parseRequests(request)
 	if err != nil {
 		t.lgr.Error("Failed to parse requests", zap.Error(err))
-		return nil, err
+		resp, err := jsonRPCResponse(http.StatusBadRequest, jsonRPCError(json.RawMessage{}, jsonRPCInvalidParams, err.Error()))
+		if err != nil {
+			t.lgr.Error("Failed to construct invalid params response", zap.Error(err))
+		}
+		return resp, nil
 	}
 	id := rand.Int31()
 	lgr := t.lgr.With(zap.Int32("id", id))
@@ -190,7 +199,6 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 			resp, err := jsonRPCResponse(http.StatusTooManyRequests, jsonRPCLimit(parsedRequest.ID))
 			if err != nil {
 				lgr.Error("Failed to construct rate-limit response", zap.Error(err))
-				return nil, err
 			}
 			return resp, nil
 		} else if added {
@@ -202,7 +210,6 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 			resp, err := jsonRPCResponse(http.StatusMethodNotAllowed, jsonRPCUnauthorized(parsedRequest.ID, parsedRequest.Path))
 			if err != nil {
 				lgr.Error("Failed to construct not-allowed response", zap.Error(err))
-				return nil, err
 			}
 			return resp, nil
 		}
@@ -212,14 +219,12 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 				resp, err := jsonRPCResponse(http.StatusInternalServerError, jsonRPCError(parsedRequest.ID, jsonRPCInternal, err.Error()))
 				if err != nil {
 					lgr.Error("Failed to construct internal error response", zap.Error(err))
-					return nil, err
 				}
 				return resp, nil
 			} else if invalid != nil {
 				resp, err := jsonRPCResponse(http.StatusBadRequest, jsonRPCError(parsedRequest.ID, jsonRPCInvalidParams, invalid.Error()))
 				if err != nil {
 					lgr.Error("Failed to construct invalid params response", zap.Error(err))
-					return nil, err
 				}
 				return resp, nil
 			}
@@ -229,7 +234,6 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 					resp, err := jsonRPCResponse(http.StatusBadRequest, jsonRPCBlockRangeLimit(parsedRequest.ID, l, t.blockRangeLimit))
 					if err != nil {
 						lgr.Error("Failed to construct block range limit response", zap.Error(err))
-						return nil, err
 					}
 					return resp, nil
 				}
@@ -242,7 +246,6 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 						resp, err := jsonRPCResponse(http.StatusBadRequest, jsonRPCBlockRangeLimit(parsedRequest.ID, l, t.blockRangeLimit))
 						if err != nil {
 							lgr.Error("Failed to construct block range limit response", zap.Error(err))
-							return nil, err
 						}
 						return resp, nil
 					}
@@ -252,18 +255,15 @@ func (t *myTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	}
 	request.Host = request.RemoteAddr //workaround for CloudFlare
 	response, err := http.DefaultTransport.RoundTrip(request)
+	elapsed := time.Since(start)
+	lgr = lgr.With(zap.Duration("runtime", elapsed))
 	if err != nil {
 		lgr.Error("RoundTrip error", zap.Error(err))
-		returnErrorCode := http.StatusBadGateway
-		if response != nil {
-			returnErrorCode = response.StatusCode
-		}
-		return jsonRPCResponse(returnErrorCode, jsonRPCError(parsedRequests[0].ID, jsonRPCInternal, err.Error()))
+		return response, err
 	}
 
-	elapsed := time.Since(start)
 	if verboseLogging {
-		lgr.Info("Request completed", zap.Duration("runtime", elapsed))
+		lgr.Info("Request completed")
 	}
 	for _, parsedRequest := range parsedRequests {
 		t.updateStats(parsedRequest, elapsed)

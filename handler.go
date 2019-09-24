@@ -73,7 +73,8 @@ func parseRequests(r *http.Request) ([]ModifiedRequest, error) {
 	ip := getIP(r)
 	if r.Body != nil {
 		body, err := ioutil.ReadAll(r.Body)
-		r.Body.Close() //closing reader
+		r.Body.Close()
+		r.Body = ioutil.NopCloser(bytes.NewBuffer(body)) // must be done, even when err
 		if err != nil {
 			return nil, fmt.Errorf("failed to read body: %v", err)
 		}
@@ -109,7 +110,6 @@ func parseRequests(r *http.Request) ([]ModifiedRequest, error) {
 				Params:     t.Params,
 			})
 		}
-		r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
 	}
 	if len(res) == 0 {
 		res = append(res, ModifiedRequest{

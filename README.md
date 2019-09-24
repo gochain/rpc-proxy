@@ -50,11 +50,11 @@ GLOBAL OPTIONS:
 Build Docker image:
 
 ```sh
-make build
+make docker
 ```
 
 Run it:
 
 ```sh
-docker run --rm -it -p 8545:8545 gochain/rpc-proxy -url http://SOME_IP:8545 -port 8545 -allow "eth_*,net_*" -rpm 1000
+make run
 ```

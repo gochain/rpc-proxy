@@ -32,7 +32,9 @@ type ConfigData struct {
 
 func main() {
 	start := time.Now()
-	lgr, err := zapdriver.NewProduction()
+	cfg := zapdriver.NewProductionConfig()
+	cfg.EncoderConfig.TimeKey = "timestamp"
+	lgr, err := cfg.Build()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create logger: %v\n", err)
 		os.Exit(1)

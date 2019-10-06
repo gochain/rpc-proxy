@@ -9,17 +9,16 @@ import (
 	"strings"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/blendle/zapdriver"
 	"github.com/go-chi/chi"
+	"github.com/go-chi/chi/middleware"
 	toml "github.com/pelletier/go-toml"
 	"github.com/rs/cors"
 	"github.com/urfave/cli"
+	"go.uber.org/zap"
 )
 
 var requestsPerMinuteLimit int
-var verboseLogging bool
 
 type ConfigData struct {
 	Port            string   `toml:",omitempty"`
@@ -39,6 +38,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to create logger: %v\n", err)
 		os.Exit(1)
 	}
+	defer lgr.Sync()
 
 	var configPath string
 	var port string
@@ -90,11 +90,6 @@ func main() {
 			Name:        "blocklimit, b",
 			Usage:       "block range query limit",
 			Destination: &blockRangeLimit,
-		},
-		cli.BoolFlag{
-			Name:        "verbose",
-			Usage:       "verbose logging enabled",
-			Destination: &verboseLogging,
 		},
 	}
 
@@ -170,6 +165,9 @@ func (cfg *ConfigData) run(lgr *zap.Logger) error {
 	}
 
 	r := chi.NewRouter()
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RequestLogger(&zapLogFormatter{lgr: lgr}))
+	r.Use(middleware.Recoverer)
 	// Use default options
 	r.Use(cors.New(cors.Options{
 		AllowedOrigins:   []string{"*"},

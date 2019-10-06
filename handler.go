@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/big"
-	"math/rand"
 	"net"
 	"net/http"
 	"strconv"
@@ -16,11 +15,10 @@ import (
 	"time"
 
 	"github.com/blendle/zapdriver"
-
-	"go.uber.org/zap"
-
+	"github.com/go-chi/chi/middleware"
 	"github.com/gochain-io/gochain/v3/goclient"
 	"github.com/gochain-io/gochain/v3/rpc"
+	"go.uber.org/zap"
 )
 
 type myTransport struct {
@@ -174,17 +172,16 @@ func jsonRPCResponse(httpCode int, v interface{}) (*http.Response, error) {
 }
 
 func (t *myTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	id := rand.Int31()
-	lgr := t.lgr.With(zap.Int32("id", id))
-	if verboseLogging {
-		lgr.Info("Request", zapdriver.HTTP(NewHTTP(req, nil)))
+	lgr := t.lgr
+	if reqID := middleware.GetReqID(req.Context()); reqID != "" {
+		lgr = lgr.With(zap.String("requestID", reqID))
 	}
 	start := time.Now()
 
 	parsedRequests, err := parseRequests(req)
 	if err != nil {
 		lgr.Error("Failed to parse requests", zap.Error(err))
-		resp, err := jsonRPCResponse(http.StatusBadRequest, jsonRPCError(json.RawMessage{}, jsonRPCInvalidParams, err.Error()))
+		resp, err := jsonRPCResponse(http.StatusBadRequest, jsonRPCError(json.RawMessage("1"), jsonRPCInvalidParams, err.Error()))
 		if err != nil {
 			lgr.Error("Failed to construct invalid params response", zap.Error(err))
 		}
@@ -192,9 +189,6 @@ func (t *myTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	if blockResponse := t.block(req.Context(), lgr, parsedRequests); blockResponse != nil {
-		if verboseLogging {
-			lgr.Info("Request blocked", zapdriver.HTTP(NewHTTP(nil, blockResponse)))
-		}
 		return blockResponse, nil
 	}
 	req.Host = req.RemoteAddr //workaround for CloudFlare
@@ -204,10 +198,6 @@ func (t *myTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if err != nil {
 		lgr.Error("RoundTrip error", zap.Error(err), zapdriver.HTTP(NewHTTP(nil, res)))
 		return res, err
-	}
-
-	if verboseLogging {
-		lgr.Info("Request completed", zapdriver.HTTP(NewHTTP(nil, res)))
 	}
 	for _, parsedRequest := range parsedRequests {
 		t.updateStats(parsedRequest, elapsed)
@@ -220,9 +210,6 @@ func (t *myTransport) block(ctx context.Context, lgr *zap.Logger, parsedRequests
 	var union *blockRange
 	for _, parsedRequest := range parsedRequests {
 		if allowed, added := t.AllowVisitor(parsedRequest); !allowed {
-			if verboseLogging {
-				lgr.Info("IP is rate-limited", zap.String("ip", parsedRequest.RemoteAddr))
-			}
 			resp, err := jsonRPCResponse(http.StatusTooManyRequests, jsonRPCLimit(parsedRequest.ID))
 			if err != nil {
 				lgr.Error("Failed to construct rate-limit response", zap.Error(err))
@@ -431,6 +418,40 @@ func (l *latestBlock) update() (chan struct{}, uint64, error) {
 	close(next)
 
 	return nil, latest, err
+}
+
+var _ middleware.LogFormatter = &zapLogFormatter{}
+
+type zapLogFormatter struct {
+	lgr *zap.Logger
+}
+
+func (z *zapLogFormatter) NewLogEntry(r *http.Request) middleware.LogEntry {
+	h := NewHTTP(r, nil)
+	lgr := z.lgr
+	if reqID := middleware.GetReqID(r.Context()); reqID != "" {
+		lgr = lgr.With(zap.String("requestID", reqID))
+	}
+	lgr.Info("Request started", zapdriver.HTTP(h))
+	return &zapLogEntry{lgr: lgr, http: h}
+}
+
+var _ middleware.LogEntry = &zapLogEntry{}
+
+type zapLogEntry struct {
+	lgr  *zap.Logger
+	http *zapdriver.HTTPPayload
+}
+
+func (z *zapLogEntry) Write(status, bytes int, elapsed time.Duration) {
+	z.http.Status = status
+	z.http.ResponseSize = strconv.Itoa(bytes)
+	z.http.Latency = fmt.Sprintf("%.9fs", elapsed.Seconds())
+	z.lgr.Info("Request complete", zapdriver.HTTP(z.http))
+}
+
+func (z *zapLogEntry) Panic(v interface{}, stack []byte) {
+	z.lgr = z.lgr.With(zap.String("stack", string(stack)), zap.String("panic", fmt.Sprintf("%+v", v)))
 }
 
 // NewHTTP returns a new HTTPPayload struct, based on the passed

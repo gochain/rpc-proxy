@@ -6,13 +6,12 @@ import (
 
 type matcher []*regexp.Regexp
 
-func (m matcher) MatchAnyRule(request ModifiedRequest) bool {
-
-	if request.Path == "" {
+func (m matcher) MatchAnyRule(method string) bool {
+	if method == "" {
 		return false
 	}
 	for _, matcher := range m {
-		if matcher.MatchString(request.Path) {
+		if matcher.MatchString(method) {
 			return true
 		}
 	}

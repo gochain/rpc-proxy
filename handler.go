@@ -187,16 +187,19 @@ func (t *myTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 		return resp, nil
 	}
-
+	methods := make([]string, len(parsedRequests))
+	for i := range parsedRequests {
+		methods[i] = parsedRequests[i].Path
+	}
+	lgr = lgr.With(zap.Strings("methods", methods))
 	if blockResponse := t.block(req.Context(), lgr, parsedRequests); blockResponse != nil {
 		return blockResponse, nil
 	}
+	lgr.Info("Forwarding request")
 	req.Host = req.RemoteAddr //workaround for CloudFlare
 	res, err := http.DefaultTransport.RoundTrip(req)
 	elapsed := time.Since(start)
-	lgr = lgr.With(zap.Duration("runtime", elapsed))
 	if err != nil {
-		lgr.Error("RoundTrip error", zap.Error(err), zapdriver.HTTP(NewHTTP(nil, res)))
 		return res, err
 	}
 	for _, parsedRequest := range parsedRequests {
@@ -209,7 +212,9 @@ func (t *myTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 func (t *myTransport) block(ctx context.Context, lgr *zap.Logger, parsedRequests []ModifiedRequest) *http.Response {
 	var union *blockRange
 	for _, parsedRequest := range parsedRequests {
+		lgr := lgr.With(zap.String("ip", parsedRequest.RemoteAddr))
 		if allowed, added := t.AllowVisitor(parsedRequest); !allowed {
+			lgr.Info("Request blocked: Rate limited")
 			resp, err := jsonRPCResponse(http.StatusTooManyRequests, jsonRPCLimit(parsedRequest.ID))
 			if err != nil {
 				lgr.Error("Failed to construct rate-limit response", zap.Error(err))
@@ -219,8 +224,8 @@ func (t *myTransport) block(ctx context.Context, lgr *zap.Logger, parsedRequests
 			lgr.Info("Added new visitor", zap.String("ip", parsedRequest.RemoteAddr))
 		}
 
-		if !t.MatchAnyRule(parsedRequest) {
-			lgr.Info("Method not allowed", zap.String("ip", parsedRequest.RemoteAddr))
+		if !t.MatchAnyRule(parsedRequest.Path) {
+			lgr.Info("Request blocked: Method not allowed")
 			resp, err := jsonRPCResponse(http.StatusMethodNotAllowed, jsonRPCUnauthorized(parsedRequest.ID, parsedRequest.Path))
 			if err != nil {
 				lgr.Error("Failed to construct not-allowed response", zap.Error(err))
@@ -236,6 +241,7 @@ func (t *myTransport) block(ctx context.Context, lgr *zap.Logger, parsedRequests
 				}
 				return resp
 			} else if invalid != nil {
+				lgr.Info("Request blocked: Invalid params", zap.Error(invalid))
 				resp, err := jsonRPCResponse(http.StatusBadRequest, jsonRPCError(parsedRequest.ID, jsonRPCInvalidParams, invalid.Error()))
 				if err != nil {
 					lgr.Error("Failed to construct invalid params response", zap.Error(err))
@@ -244,7 +250,7 @@ func (t *myTransport) block(ctx context.Context, lgr *zap.Logger, parsedRequests
 			}
 			if r != nil {
 				if l := r.len(); l > t.blockRangeLimit {
-					// This request exceeds the block range limit.
+					lgr.Info("Request blocked: Exceeds block range limit", zap.Uint64("range", l), zap.Uint64("limit", t.blockRangeLimit))
 					resp, err := jsonRPCResponse(http.StatusBadRequest, jsonRPCBlockRangeLimit(parsedRequest.ID, l, t.blockRangeLimit))
 					if err != nil {
 						lgr.Error("Failed to construct block range limit response", zap.Error(err))
@@ -256,7 +262,7 @@ func (t *myTransport) block(ctx context.Context, lgr *zap.Logger, parsedRequests
 				} else {
 					union.extend(r)
 					if l := union.len(); l > t.blockRangeLimit {
-						// The union of the ranges so far exceeds the block range limit.
+						lgr.Info("Request blocked: Exceeds block range limit", zap.Uint64("range", l), zap.Uint64("limit", t.blockRangeLimit))
 						resp, err := jsonRPCResponse(http.StatusBadRequest, jsonRPCBlockRangeLimit(parsedRequest.ID, l, t.blockRangeLimit))
 						if err != nil {
 							lgr.Error("Failed to construct block range limit response", zap.Error(err))

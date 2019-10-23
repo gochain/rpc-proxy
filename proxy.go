@@ -12,6 +12,9 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"sort"
+	"strconv"
+
+	"github.com/gochain-io/gochain/v3/common"
 
 	"go.uber.org/zap"
 
@@ -101,8 +104,30 @@ func (p *Server) Stats(w http.ResponseWriter, r *http.Request) {
 
 func (p *Server) Example(w http.ResponseWriter, r *http.Request) {
 	method := chi.URLParam(r, "method")
-	do := func(params ...interface{}) {
-		data, err := p.example(method, params...)
+	args := []string{
+		chi.URLParam(r, "arg"),
+		chi.URLParam(r, "arg2"),
+		chi.URLParam(r, "arg3"),
+	}
+	do := func(params ...func(string) (interface{}, error)) {
+		var fmtd []interface{}
+		for i, p := range params {
+			if i > len(args) {
+				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+				return
+			}
+			if p == nil {
+				fmtd = append(fmtd, args[i])
+				continue
+			}
+			arg, err := p(args[i])
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			fmtd = append(fmtd, arg)
+		}
+		data, err := p.example(method, fmtd...)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -110,16 +135,21 @@ func (p *Server) Example(w http.ResponseWriter, r *http.Request) {
 
 		w.Write(data)
 	}
-	param := chi.URLParam(r, "param")
 	switch method {
 	case "clique_getSigners":
-		do("latest")
+		do(hexNumOrLatest)
+	case "clique_getSignersAtHash":
+		do(hexHash)
 	case "clique_getSnapshot":
-		do("latest")
+		do(hexNumOrLatest)
+	case "clique_getSnapshotAtHash":
+		do(hexHash)
 	case "clique_getVoters":
-		do("latest")
+		do(hexNumOrLatest)
+	case "clique_getVotersAtHash":
+		do(hexHash)
 	case "eth_blockNumber":
-		do("latest")
+		do(hexNumOrLatest)
 	case "eth_chainId":
 		do()
 	case "eth_gasPrice":
@@ -127,52 +157,134 @@ func (p *Server) Example(w http.ResponseWriter, r *http.Request) {
 	case "eth_genesisAlloc":
 		do()
 	case "eth_getBalance":
-		addr := "0x2c9c3FF339e1a38340987cd7fc5982Be7E39936d"
-		if param != "" {
-			addr = param
-		}
-		do(addr, "latest")
+		do(hexAddr, hexNumOrLatest)
 	case "eth_getBlockByHash":
-		hash := "0x2c9c3FF339e1a38340987cd7fc5982Be7E39936d"
-		if param != "" {
-			hash = param
-		}
-		do(hash, false)
+		do(hexHash, boolOrFalse)
 	case "eth_getBlockByNumber":
-		var num interface{} = "latest"
-		if param != "" {
-			i, ok := new(big.Int).SetString(param, 10)
-			if ok {
-				num = fmt.Sprintf("0x%X", i)
-			} else {
-				num = param
+		do(hexNumOrLatest, boolOrFalse)
+	case "eth_getBlockTransactionCountByHash":
+		do(hexHash)
+	case "eth_getBlockTransactionCountByNumber":
+		do(hexNumOrLatest)
+	case "eth_getCode":
+		do(hexAddr, hexNumOrLatest)
+	case "eth_getFilterChanges":
+		do(nil)
+	case "eth_getLogs":
+		do(func(arg string) (interface{}, error) {
+			if hasHexPrefix(arg) {
+				arg = arg[2:]
 			}
-		}
-		do(num, false)
+			if !isHex(arg) {
+				return nil, fmt.Errorf("non-hex argument: %s", arg)
+			}
+			return map[string]interface{}{"blockhash": "0x" + arg}, nil
+		})
+	case "eth_getStorageAt":
+		do(hexAddr, hexNumOrZero, hexNumOrLatest)
+	case "eth_getTransactionByBlockHashAndIndex":
+		do(nil, hexNumOrZero)
+	case "eth_getTransactionByBlockNumberAndIndex":
+		do(hexNumOrLatest, hexNumOrZero)
 	case "eth_getTransactionCount":
-		hash := "0x2c9c3FF339e1a38340987cd7fc5982Be7E39936d"
-		if param != "" {
-			hash = param
-		}
-		do(hash, "latest")
+		do(hexAddr, hexNumOrLatest)
 	case "eth_getTransactionByHash", "eth_getTransactionReceipt":
-		hash := "0x2c9c3FF339e1a38340987cd7fc5982Be7E39936d"
-		if param != "" {
-			hash = param
-		}
-		do(hash)
+		do(hexHash)
 	case "eth_totalSupply":
-		do("latest")
+		do(hexNumOrLatest)
 	case "net_listening":
 		do()
 	case "net_version":
 		do()
 	case "rpc_modules":
 		do()
+	case "web3_clientVersion":
+		do()
 
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func hexAddr(arg string) (interface{}, error) {
+	if !common.IsHexAddress(arg) {
+		return nil, fmt.Errorf("not a hex address: %s", arg)
+	}
+	return arg, nil
+}
+
+func isHexHash(s string) bool {
+	if hasHexPrefix(s) {
+		s = s[2:]
+	}
+	return len(s) == 2*common.HashLength && isHex(s)
+}
+
+func hexHash(arg string) (interface{}, error) {
+	if !isHexHash(arg) {
+		return nil, fmt.Errorf("not a hex hash: %s", arg)
+	}
+	return arg, nil
+}
+
+func boolOrFalse(arg string) (interface{}, error) {
+	if arg == "" {
+		return false, nil
+	}
+	v, err := strconv.ParseBool(arg)
+	if err != nil {
+		return nil, fmt.Errorf("not a bool: %v", err)
+	}
+	return v, nil
+}
+
+func hexNumOrLatest(arg string) (interface{}, error) {
+	return hexNumOr(arg, "latest", "pending", "earliest")
+}
+
+func hexNumOrZero(arg string) (interface{}, error) {
+	return hexNumOr(arg, "0x0")
+}
+
+// hexNumOr reforms decimal integers as '0x' prefixed hex and returns
+// or for empty, otherwise an error is returned.
+func hexNumOr(arg string, or string, allow ...string) (interface{}, error) {
+	if arg == "" {
+		return or, nil
+	}
+	for _, a := range allow {
+		if arg == a {
+			return arg, nil
+		}
+	}
+	i, ok := new(big.Int).SetString(arg, 0)
+	if !ok {
+		return nil, fmt.Errorf("not an integer: %s", arg)
+	}
+	return fmt.Sprintf("0x%X", i), nil
+}
+
+// hasHexPrefix validates str begins with '0x' or '0X'.
+func hasHexPrefix(str string) bool {
+	return len(str) >= 2 && str[0] == '0' && (str[1] == 'x' || str[1] == 'X')
+}
+
+// isHexCharacter returns bool of c being a valid hexadecimal.
+func isHexCharacter(c byte) bool {
+	return ('0' <= c && c <= '9') || ('a' <= c && c <= 'f') || ('A' <= c && c <= 'F')
+}
+
+// isHex validates whether each byte is valid hexadecimal string.
+func isHex(str string) bool {
+	if len(str)%2 != 0 {
+		return false
+	}
+	for _, c := range []byte(str) {
+		if !isHexCharacter(c) {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *Server) example(method string, params ...interface{}) ([]byte, error) {

@@ -183,7 +183,9 @@ func (cfg *ConfigData) run(lgr *zap.Logger) error {
 	})
 	r.Get("/stats", server.Stats)
 	r.Get("/x/{method}", server.Example)
-	r.Get("/x/{method}/{param}", server.Example)
+	r.Get("/x/{method}/{arg}", server.Example)
+	r.Get("/x/{method}/{arg}/{arg2}", server.Example)
+	r.Get("/x/{method}/{arg}/{arg2}/{arg3}", server.Example)
 	r.Head("/x/net_version", func(w http.ResponseWriter, r *http.Request) {
 		_, err := server.example("net_version")
 		if err != nil {

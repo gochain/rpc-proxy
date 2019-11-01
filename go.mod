@@ -3,7 +3,7 @@ module github.com/gochain-io/rpc-proxy
 go 1.12
 
 require (
-	github.com/blendle/zapdriver v1.1.6
+	github.com/blendle/zapdriver v1.2.1
 	github.com/go-chi/chi v3.3.2+incompatible
 	github.com/go-stack/stack v1.8.0 // indirect
 	github.com/gochain-io/gochain/v3 v3.2.8
@@ -11,9 +11,8 @@ require (
 	github.com/pelletier/go-toml v1.2.0
 	github.com/rs/cors v1.7.0
 	github.com/urfave/cli v1.20.0
-	go.uber.org/atomic v1.4.0 // indirect
-	go.uber.org/multierr v1.1.0 // indirect
-	go.uber.org/zap v1.10.0
+	go.uber.org/multierr v1.2.0 // indirect
+	go.uber.org/zap v1.11.0
 	golang.org/x/net v0.0.0-20190813141303-74dc4d7220e7 // indirect
 	golang.org/x/time v0.0.0-20190308202827-9d24e82272b4
 )

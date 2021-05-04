@@ -457,7 +457,7 @@ func NewHTTP(req *http.Request, res *http.Response) *zapdriver.HTTPPayload {
 		p = zapdriver.HTTPPayload{
 			RequestMethod: req.Method,
 			UserAgent:     req.UserAgent(),
-			RemoteIP:      req.RemoteAddr,
+			RemoteIP:      getIP(req),
 			Referer:       req.Referer(),
 			Protocol:      req.Proto,
 			RequestSize:   strconv.FormatInt(req.ContentLength, 10),

@@ -40,7 +40,6 @@ func (cfg *ConfigData) NewServer(lgr *zap.Logger) (*Server, error) {
 	s.myTransport.lgr = lgr
 	s.myTransport.blockRangeLimit = cfg.BlockRangeLimit
 	s.myTransport.url = cfg.URL
-	s.stats = make(map[string]MonitoringPath)
 	s.matcher, err = newMatcher(cfg.Allow)
 	if err != nil {
 		return nil, err
@@ -90,16 +89,6 @@ func (p *Server) HomePage(w http.ResponseWriter, r *http.Request) {
 func (p *Server) RPCProxy(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-rpc-proxy", "rpc-proxy")
 	p.proxy.ServeHTTP(w, r)
-}
-
-func (p *Server) Stats(w http.ResponseWriter, r *http.Request) {
-	stats, err := p.getStats()
-	if err != nil {
-		http.Error(w, "failed to get stats", http.StatusInternalServerError)
-		p.lgr.Error("Failed to serve stats", zap.Error(err))
-	} else {
-		w.Write(stats)
-	}
 }
 
 func (p *Server) Example(w http.ResponseWriter, r *http.Request) {

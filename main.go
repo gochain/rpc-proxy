@@ -179,7 +179,6 @@ func (cfg *ConfigData) run(lgr *zap.Logger) error {
 	r.Head("/", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	r.Get("/stats", server.Stats)
 	r.Get("/x/{method}", server.Example)
 	r.Get("/x/{method}/{arg}", server.Example)
 	r.Get("/x/{method}/{arg}/{arg2}", server.Example)

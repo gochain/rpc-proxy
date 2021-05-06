@@ -28,9 +28,6 @@ type myTransport struct {
 	matcher
 	limiters
 
-	stats   map[string]MonitoringPath
-	statsMu sync.RWMutex
-
 	latestBlock
 }
 
@@ -176,7 +173,6 @@ func (t *myTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if reqID := middleware.GetReqID(req.Context()); reqID != "" {
 		lgr = lgr.With(zap.String("requestID", reqID))
 	}
-	start := time.Now()
 
 	parsedRequests, err := parseRequests(req)
 	if err != nil {
@@ -197,15 +193,7 @@ func (t *myTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	lgr.Info("Forwarding request")
 	req.Host = req.RemoteAddr //workaround for CloudFlare
-	res, err := http.DefaultTransport.RoundTrip(req)
-	elapsed := time.Since(start)
-	if err != nil {
-		return res, err
-	}
-	for _, parsedRequest := range parsedRequests {
-		t.updateStats(parsedRequest, elapsed)
-	}
-	return res, nil
+	return http.DefaultTransport.RoundTrip(req)
 }
 
 // block returns a response only if the request should be blocked, otherwise it returns nil if allowed.
@@ -469,7 +457,7 @@ func NewHTTP(req *http.Request, res *http.Response) *zapdriver.HTTPPayload {
 		p = zapdriver.HTTPPayload{
 			RequestMethod: req.Method,
 			UserAgent:     req.UserAgent(),
-			RemoteIP:      req.RemoteAddr,
+			RemoteIP:      getIP(req),
 			Referer:       req.Referer(),
 			Protocol:      req.Proto,
 			RequestSize:   strconv.FormatInt(req.ContentLength, 10),

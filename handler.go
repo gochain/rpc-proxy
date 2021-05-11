@@ -63,15 +63,16 @@ func getIP(r *http.Request) string {
 	return r.RemoteAddr
 }
 
-func parseRequests(r *http.Request) ([]ModifiedRequest, error) {
+func parseRequests(r *http.Request) (string, []string, []ModifiedRequest, error) {
 	var res []ModifiedRequest
+	var methods []string
 	ip := getIP(r)
 	if r.Body != nil {
 		body, err := ioutil.ReadAll(r.Body)
 		r.Body.Close()
 		r.Body = ioutil.NopCloser(bytes.NewBuffer(body)) // must be done, even when err
 		if err != nil {
-			return nil, fmt.Errorf("failed to read body: %v", err)
+			return "", nil, nil, fmt.Errorf("failed to read body: %v", err)
 		}
 		type rpcRequest struct {
 			ID     json.RawMessage   `json:"id"`
@@ -82,9 +83,10 @@ func parseRequests(r *http.Request) ([]ModifiedRequest, error) {
 			var arr []rpcRequest
 			err = json.Unmarshal(body, &arr)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse JSON batch request: %v", err)
+				return "", nil, nil, fmt.Errorf("failed to parse JSON batch request: %v", err)
 			}
 			for _, t := range arr {
+				methods = append(methods, t.Method)
 				res = append(res, ModifiedRequest{
 					ID:         t.ID,
 					Path:       t.Method,
@@ -96,8 +98,9 @@ func parseRequests(r *http.Request) ([]ModifiedRequest, error) {
 			var t rpcRequest
 			err = json.Unmarshal(body, &t)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse JSON request: %v", err)
+				return "", nil, nil, fmt.Errorf("failed to parse JSON request: %v", err)
 			}
+			methods = append(methods, t.Method)
 			res = append(res, ModifiedRequest{
 				ID:         t.ID,
 				Path:       t.Method,
@@ -107,12 +110,13 @@ func parseRequests(r *http.Request) ([]ModifiedRequest, error) {
 		}
 	}
 	if len(res) == 0 {
+		methods = append(methods, r.URL.Path)
 		res = append(res, ModifiedRequest{
 			Path:       r.URL.Path,
 			RemoteAddr: ip,
 		})
 	}
-	return res, nil
+	return ip, methods, res, nil
 }
 
 const (
@@ -174,7 +178,7 @@ func (t *myTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		lgr = lgr.With(zap.String("requestID", reqID))
 	}
 
-	parsedRequests, err := parseRequests(req)
+	ip, methods, parsedRequests, err := parseRequests(req)
 	if err != nil {
 		lgr.Error("Failed to parse requests", zap.Error(err))
 		resp, err := jsonRPCResponse(http.StatusBadRequest, jsonRPCError(json.RawMessage("1"), jsonRPCInvalidParams, err.Error()))
@@ -183,11 +187,7 @@ func (t *myTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 		return resp, nil
 	}
-	methods := make([]string, len(parsedRequests))
-	for i := range parsedRequests {
-		methods[i] = parsedRequests[i].Path
-	}
-	lgr = lgr.With(zap.Strings("methods", methods))
+	lgr = lgr.With(zap.String("remoteIp", ip), zap.Strings("methods", methods))
 	if blockResponse := t.block(req.Context(), lgr, parsedRequests); blockResponse != nil {
 		return blockResponse, nil
 	}

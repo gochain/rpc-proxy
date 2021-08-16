@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -9,13 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/blendle/zapdriver"
-	"github.com/go-chi/chi"
-	"github.com/go-chi/chi/middleware"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	toml "github.com/pelletier/go-toml"
 	"github.com/rs/cors"
-	"github.com/urfave/cli"
-	"go.uber.org/zap"
+	"github.com/treeder/gcputils"
+	"github.com/treeder/gotils/v2"
+	"github.com/urfave/cli/v2"
 )
 
 var requestsPerMinuteLimit int
@@ -30,13 +31,10 @@ type ConfigData struct {
 }
 
 func main() {
+	ctx := context.Background()
 	start := time.Now()
-	lgr, err := zapdriver.NewProduction()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create logger: %v\n", err)
-		os.Exit(1)
-	}
-	defer lgr.Sync()
+
+	gotils.SetLoggable(gcputils.NewLogger())
 
 	var configPath string
 	var port string
@@ -51,40 +49,40 @@ func main() {
 	app.Version = Version
 
 	app.Flags = []cli.Flag{
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:        "config, c",
 			Usage:       "path to toml config file",
 			Destination: &configPath,
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:        "port, p",
 			Value:       "8545",
 			Usage:       "port to serve",
 			Destination: &port,
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:        "url, u",
 			Value:       "http://127.0.0.1:8040",
 			Usage:       "redirect url",
 			Destination: &redirecturl,
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:        "allow, a",
 			Usage:       "comma separated list of allowed paths",
 			Destination: &allowedPaths,
 		},
-		cli.IntFlag{
+		&cli.IntFlag{
 			Name:        "rpm",
 			Value:       1000,
 			Usage:       "limit for number of requests per minute from single IP",
 			Destination: &requestsPerMinuteLimit,
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:        "nolimit, n",
 			Usage:       "list of ips allowed unlimited requests(separated by commas)",
 			Destination: &noLimitIPs,
 		},
-		cli.Uint64Flag{
+		&cli.Uint64Flag{
 			Name:        "blocklimit, b",
 			Usage:       "block range query limit",
 			Destination: &blockRangeLimit,
@@ -140,31 +138,32 @@ func main() {
 			cfg.BlockRangeLimit = blockRangeLimit
 		}
 
-		return cfg.run(lgr)
+		return cfg.run(ctx)
 	}
 
+	ctx = gotils.With(ctx, "runtime", time.Since(start))
 	if err := app.Run(os.Args); err != nil {
-		lgr.Fatal("Fatal error", zap.Error(err), zap.Duration("runtime", time.Since(start)))
+		gotils.L(ctx).Error().Printf("Fatal error: %v", err)
+		return
 	}
-	lgr.Info("Shutting down", zap.Duration("runtime", time.Since(start)))
+	gotils.L(ctx).Info().Print("Shutting down")
 }
 
-func (cfg *ConfigData) run(lgr *zap.Logger) error {
+func (cfg *ConfigData) run(ctx context.Context) error {
 	sort.Strings(cfg.Allow)
 	sort.Strings(cfg.NoLimit)
 
-	lgr.Info("Server starting", zap.String("port", cfg.Port), zap.String("redirectURL", cfg.URL),
-		zap.Int("rpmLimit", cfg.RPM), zap.Strings("exempt", cfg.NoLimit), zap.Strings("allowed", cfg.Allow))
+	gotils.L(ctx).Info().Println("Server starting, port:", cfg.Port, "redirectURL:", cfg.URL,
+		"rpmLimit:", cfg.RPM, "exempt:", cfg.NoLimit, "allowed:", cfg.Allow)
 
 	// Create proxy server.
-	server, err := cfg.NewServer(lgr)
+	server, err := cfg.NewServer()
 	if err != nil {
 		return fmt.Errorf("failed to start server: %s", err)
 	}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RequestLogger(&zapLogFormatter{lgr: lgr}))
 	r.Use(middleware.Recoverer)
 	// Use default options
 	r.Use(cors.New(cors.Options{
@@ -186,7 +185,7 @@ func (cfg *ConfigData) run(lgr *zap.Logger) error {
 	r.Head("/x/net_version", func(w http.ResponseWriter, r *http.Request) {
 		_, err := server.example("net_version")
 		if err != nil {
-			lgr.Error("Failed to ping RPC", zap.Error(err))
+			gotils.L(ctx).Error().Printf("Failed to ping RPC: %v", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}

@@ -14,30 +14,26 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/gochain-io/gochain/v3/common"
-
-	"go.uber.org/zap"
-
-	"github.com/go-chi/chi"
+	"github.com/go-chi/chi/v5"
+	"github.com/gochain/gochain/v3/common"
+	"github.com/treeder/gotils/v2"
 	"golang.org/x/time/rate"
 )
 
 type Server struct {
 	target *url.URL
-	lgr    *zap.Logger
 	proxy  *httputil.ReverseProxy
 	myTransport
 	homepage []byte
 }
 
-func (cfg *ConfigData) NewServer(lgr *zap.Logger) (*Server, error) {
+func (cfg *ConfigData) NewServer() (*Server, error) {
 	url, err := url.Parse(cfg.URL)
 	if err != nil {
 		return nil, err
 	}
 
-	s := &Server{target: url, lgr: lgr, proxy: httputil.NewSingleHostReverseProxy(url)}
-	s.myTransport.lgr = lgr
+	s := &Server{target: url, proxy: httputil.NewSingleHostReverseProxy(url)}
 	s.myTransport.blockRangeLimit = cfg.BlockRangeLimit
 	s.myTransport.url = cfg.URL
 	s.matcher, err = newMatcher(cfg.Allow)
@@ -80,8 +76,9 @@ func (cfg *ConfigData) NewServer(lgr *zap.Logger) (*Server, error) {
 }
 
 func (p *Server) HomePage(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	if _, err := io.Copy(w, bytes.NewReader(p.homepage)); err != nil {
-		p.lgr.Error("Failed to serve homepage", zap.Error(err))
+		gotils.L(ctx).Error().Printf("Failed to serve homepage: %v", err)
 		return
 	}
 }

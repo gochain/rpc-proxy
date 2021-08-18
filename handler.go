@@ -187,7 +187,7 @@ func (t *myTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	ctx = gotils.With(ctx, "remoteIp", ip)
 	ctx = gotils.With(ctx, "methods", methods)
-	if blockResponse := t.block(req.Context(), parsedRequests); blockResponse != nil {
+	if blockResponse := t.block(ctx, parsedRequests); blockResponse != nil {
 		return blockResponse, nil
 	}
 

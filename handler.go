@@ -9,20 +9,17 @@ import (
 	"math/big"
 	"net"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/blendle/zapdriver"
-	"github.com/go-chi/chi/middleware"
-	"github.com/gochain-io/gochain/v3/goclient"
-	"github.com/gochain-io/gochain/v3/rpc"
-	"go.uber.org/zap"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/gochain/gochain/v3/goclient"
+	"github.com/gochain/gochain/v3/rpc"
+	"github.com/treeder/gotils/v2"
 )
 
 type myTransport struct {
-	lgr             *zap.Logger
 	blockRangeLimit uint64 // 0 means none
 
 	matcher
@@ -173,50 +170,53 @@ func jsonRPCResponse(httpCode int, v interface{}) (*http.Response, error) {
 }
 
 func (t *myTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	lgr := t.lgr
+	ctx := req.Context()
 	if reqID := middleware.GetReqID(req.Context()); reqID != "" {
-		lgr = lgr.With(zap.String("requestID", reqID))
+		ctx = gotils.With(ctx, "requestID", reqID)
 	}
 
 	ip, methods, parsedRequests, err := parseRequests(req)
 	if err != nil {
-		lgr.Error("Failed to parse requests", zap.Error(err))
+		gotils.L(ctx).Error().Printf("Failed to parse requests: %v", err)
 		resp, err := jsonRPCResponse(http.StatusBadRequest, jsonRPCError(json.RawMessage("1"), jsonRPCInvalidParams, err.Error()))
 		if err != nil {
-			lgr.Error("Failed to construct invalid params response", zap.Error(err))
+			gotils.L(ctx).Error().Printf("Failed to construct invalid params response: %v", err)
 		}
 		return resp, nil
 	}
-	lgr = lgr.With(zap.String("remoteIp", ip), zap.Strings("methods", methods))
-	if blockResponse := t.block(req.Context(), lgr, parsedRequests); blockResponse != nil {
+
+	ctx = gotils.With(ctx, "remoteIp", ip)
+	ctx = gotils.With(ctx, "methods", methods)
+	if blockResponse := t.block(ctx, parsedRequests); blockResponse != nil {
 		return blockResponse, nil
 	}
-	lgr.Info("Forwarding request")
+
+	gotils.L(ctx).Info().Print("Forwarding request")
 	req.Host = req.RemoteAddr //workaround for CloudFlare
 	return http.DefaultTransport.RoundTrip(req)
 }
 
 // block returns a response only if the request should be blocked, otherwise it returns nil if allowed.
-func (t *myTransport) block(ctx context.Context, lgr *zap.Logger, parsedRequests []ModifiedRequest) *http.Response {
+func (t *myTransport) block(ctx context.Context, parsedRequests []ModifiedRequest) *http.Response {
 	var union *blockRange
 	for _, parsedRequest := range parsedRequests {
-		lgr := lgr.With(zap.String("ip", parsedRequest.RemoteAddr))
+		ctx = gotils.With(ctx, "ip", parsedRequest.RemoteAddr)
 		if allowed, added := t.AllowVisitor(parsedRequest); !allowed {
-			lgr.Info("Request blocked: Rate limited")
+			gotils.L(ctx).Info().Print("Request blocked: Rate limited")
 			resp, err := jsonRPCResponse(http.StatusTooManyRequests, jsonRPCLimit(parsedRequest.ID))
 			if err != nil {
-				lgr.Error("Failed to construct rate-limit response", zap.Error(err))
+				gotils.L(ctx).Error().Printf("Failed to construct rate-limit response: %v", err)
 			}
 			return resp
 		} else if added {
-			lgr.Info("Added new visitor", zap.String("ip", parsedRequest.RemoteAddr))
+			gotils.L(ctx).Info().Printf("Added new visitor, ip: %v", parsedRequest.RemoteAddr)
 		}
 
 		if !t.MatchAnyRule(parsedRequest.Path) {
-			lgr.Info("Request blocked: Method not allowed")
+			gotils.L(ctx).Info().Print("Request blocked: Method not allowed")
 			resp, err := jsonRPCResponse(http.StatusMethodNotAllowed, jsonRPCUnauthorized(parsedRequest.ID, parsedRequest.Path))
 			if err != nil {
-				lgr.Error("Failed to construct not-allowed response", zap.Error(err))
+				gotils.L(ctx).Error().Printf("Failed to construct not-allowed response: %v", err)
 			}
 			return resp
 		}
@@ -225,23 +225,23 @@ func (t *myTransport) block(ctx context.Context, lgr *zap.Logger, parsedRequests
 			if err != nil {
 				resp, err := jsonRPCResponse(http.StatusInternalServerError, jsonRPCError(parsedRequest.ID, jsonRPCInternal, err.Error()))
 				if err != nil {
-					lgr.Error("Failed to construct internal error response", zap.Error(err))
+					gotils.L(ctx).Error().Printf("Failed to construct internal error response: %v", err)
 				}
 				return resp
 			} else if invalid != nil {
-				lgr.Info("Request blocked: Invalid params", zap.Error(invalid))
+				gotils.L(ctx).Info().Printf("Request blocked: Invalid params: %v", invalid)
 				resp, err := jsonRPCResponse(http.StatusBadRequest, jsonRPCError(parsedRequest.ID, jsonRPCInvalidParams, invalid.Error()))
 				if err != nil {
-					lgr.Error("Failed to construct invalid params response", zap.Error(err))
+					gotils.L(ctx).Error().Printf("Failed to construct invalid params response: %v", err)
 				}
 				return resp
 			}
 			if r != nil {
 				if l := r.len(); l > t.blockRangeLimit {
-					lgr.Info("Request blocked: Exceeds block range limit", zap.Uint64("range", l), zap.Uint64("limit", t.blockRangeLimit))
+					gotils.L(ctx).Info().Println("Request blocked: Exceeds block range limit, range:", l, "limit:", t.blockRangeLimit)
 					resp, err := jsonRPCResponse(http.StatusBadRequest, jsonRPCBlockRangeLimit(parsedRequest.ID, l, t.blockRangeLimit))
 					if err != nil {
-						lgr.Error("Failed to construct block range limit response", zap.Error(err))
+						gotils.L(ctx).Error().Printf("Failed to construct block range limit response: %v", err)
 					}
 					return resp
 				}
@@ -250,10 +250,10 @@ func (t *myTransport) block(ctx context.Context, lgr *zap.Logger, parsedRequests
 				} else {
 					union.extend(r)
 					if l := union.len(); l > t.blockRangeLimit {
-						lgr.Info("Request blocked: Exceeds block range limit", zap.Uint64("range", l), zap.Uint64("limit", t.blockRangeLimit))
+						gotils.L(ctx).Info().Println("Request blocked: Exceeds block range limit, range:", l, "limit:", t.blockRangeLimit)
 						resp, err := jsonRPCResponse(http.StatusBadRequest, jsonRPCBlockRangeLimit(parsedRequest.ID, l, t.blockRangeLimit))
 						if err != nil {
-							lgr.Error("Failed to construct block range limit response", zap.Error(err))
+							gotils.L(ctx).Error().Printf("Failed to construct block range limit response: %v", err)
 						}
 						return resp
 					}
@@ -412,65 +412,4 @@ func (l *latestBlock) update() (chan struct{}, uint64, error) {
 	close(next)
 
 	return nil, latest, err
-}
-
-var _ middleware.LogFormatter = &zapLogFormatter{}
-
-type zapLogFormatter struct {
-	lgr *zap.Logger
-}
-
-func (z *zapLogFormatter) NewLogEntry(r *http.Request) middleware.LogEntry {
-	h := NewHTTP(r, nil)
-	lgr := z.lgr
-	if reqID := middleware.GetReqID(r.Context()); reqID != "" {
-		lgr = lgr.With(zap.String("requestID", reqID))
-	}
-	lgr.Info("Request started", zapdriver.HTTP(h))
-	return &zapLogEntry{lgr: lgr, http: h}
-}
-
-var _ middleware.LogEntry = &zapLogEntry{}
-
-type zapLogEntry struct {
-	lgr  *zap.Logger
-	http *zapdriver.HTTPPayload
-}
-
-func (z *zapLogEntry) Write(status, bytes int, elapsed time.Duration) {
-	z.http.Status = status
-	z.http.ResponseSize = strconv.Itoa(bytes)
-	z.http.Latency = fmt.Sprintf("%.9fs", elapsed.Seconds())
-	z.lgr.Info("Request complete", zapdriver.HTTP(z.http))
-}
-
-func (z *zapLogEntry) Panic(v interface{}, stack []byte) {
-	z.lgr = z.lgr.With(zap.String("stack", string(stack)), zap.String("panic", fmt.Sprintf("%+v", v)))
-}
-
-// NewHTTP returns a new HTTPPayload struct, based on the passed
-// in http.Request and http.Response objects. They are not modified
-// in any way, unlike the zapdriver version this is based on.
-func NewHTTP(req *http.Request, res *http.Response) *zapdriver.HTTPPayload {
-	var p zapdriver.HTTPPayload
-	if req != nil {
-		p = zapdriver.HTTPPayload{
-			RequestMethod: req.Method,
-			UserAgent:     req.UserAgent(),
-			RemoteIP:      getIP(req),
-			Referer:       req.Referer(),
-			Protocol:      req.Proto,
-			RequestSize:   strconv.FormatInt(req.ContentLength, 10),
-		}
-		if req.URL != nil {
-			p.RequestURL = req.URL.String()
-		}
-	}
-
-	if res != nil {
-		p.ResponseSize = strconv.FormatInt(res.ContentLength, 10)
-		p.Status = res.StatusCode
-	}
-
-	return &p
 }

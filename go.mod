@@ -1,18 +1,23 @@
 module github.com/gochain-io/rpc-proxy
 
-go 1.12
+go 1.16
 
 require (
-	github.com/blendle/zapdriver v1.2.1
-	github.com/go-chi/chi v3.3.2+incompatible
-	github.com/go-stack/stack v1.8.0 // indirect
-	github.com/gochain-io/gochain/v3 v3.2.8
-	github.com/hashicorp/golang-lru v0.5.3 // indirect
-	github.com/pelletier/go-toml v1.2.0
-	github.com/rs/cors v1.7.0
-	github.com/urfave/cli v1.20.0
-	go.uber.org/multierr v1.2.0 // indirect
-	go.uber.org/zap v1.11.0
-	golang.org/x/net v0.0.0-20190813141303-74dc4d7220e7 // indirect
-	golang.org/x/time v0.0.0-20190308202827-9d24e82272b4
+	cloud.google.com/go v0.92.0 // indirect
+	github.com/btcsuite/btcd v0.22.0-beta // indirect
+	github.com/cpuguy83/go-md2man/v2 v2.0.1 // indirect
+	github.com/go-chi/chi/v5 v5.0.3
+	github.com/gochain/gochain/v3 v3.4.7
+	github.com/golang/snappy v0.0.4 // indirect
+	github.com/pelletier/go-toml v1.9.3
+	github.com/rs/cors v1.8.0
+	github.com/treeder/gcputils v0.1.1
+	github.com/treeder/gotils/v2 v2.0.9
+	github.com/urfave/cli/v2 v2.3.0
+	golang.org/x/crypto v0.0.0-20210813211128-0a44fdfbc16e // indirect
+	golang.org/x/mod v0.5.0 // indirect
+	golang.org/x/net v0.0.0-20210813160813-60bc85c4be6d // indirect
+	golang.org/x/sys v0.0.0-20210816183151-1e6c022a8912 // indirect
+	golang.org/x/time v0.0.0-20210723032227-1f47c861a9ac
+	google.golang.org/genproto v0.0.0-20210816143620-e15ff196659d // indirect
 )

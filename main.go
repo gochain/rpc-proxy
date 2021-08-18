@@ -32,7 +32,6 @@ type ConfigData struct {
 
 func main() {
 	ctx := context.Background()
-	start := time.Now()
 
 	gotils.SetLoggable(gcputils.NewLogger())
 

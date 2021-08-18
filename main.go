@@ -141,7 +141,6 @@ func main() {
 		return cfg.run(ctx)
 	}
 
-	ctx = gotils.With(ctx, "runtime", time.Since(start))
 	if err := app.Run(os.Args); err != nil {
 		gotils.L(ctx).Error().Printf("Fatal error: %v", err)
 		return

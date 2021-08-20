@@ -9,6 +9,7 @@ require (
 	github.com/go-chi/chi/v5 v5.0.3
 	github.com/gochain/gochain/v3 v3.4.7
 	github.com/golang/snappy v0.0.4 // indirect
+	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/pelletier/go-toml v1.9.3
 	github.com/rs/cors v1.8.0
 	github.com/treeder/gcputils v0.1.1

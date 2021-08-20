@@ -71,39 +71,9 @@ func parseRequests(r *http.Request) (string, []string, []ModifiedRequest, error)
 		if err != nil {
 			return "", nil, nil, fmt.Errorf("failed to read body: %v", err)
 		}
-		type rpcRequest struct {
-			ID     json.RawMessage   `json:"id"`
-			Method string            `json:"method"`
-			Params []json.RawMessage `json:"params"`
-		}
-		if isBatch(body) {
-			var arr []rpcRequest
-			err = json.Unmarshal(body, &arr)
-			if err != nil {
-				return "", nil, nil, fmt.Errorf("failed to parse JSON batch request: %v", err)
-			}
-			for _, t := range arr {
-				methods = append(methods, t.Method)
-				res = append(res, ModifiedRequest{
-					ID:         t.ID,
-					Path:       t.Method,
-					RemoteAddr: ip,
-					Params:     t.Params,
-				})
-			}
-		} else {
-			var t rpcRequest
-			err = json.Unmarshal(body, &t)
-			if err != nil {
-				return "", nil, nil, fmt.Errorf("failed to parse JSON request: %v", err)
-			}
-			methods = append(methods, t.Method)
-			res = append(res, ModifiedRequest{
-				ID:         t.ID,
-				Path:       t.Method,
-				RemoteAddr: ip,
-				Params:     t.Params,
-			})
+		methods, res, err = parseMessage(body, ip)
+		if err != nil {
+			return "", nil, nil, err
 		}
 	}
 	if len(res) == 0 {
@@ -116,6 +86,44 @@ func parseRequests(r *http.Request) (string, []string, []ModifiedRequest, error)
 	return ip, methods, res, nil
 }
 
+func parseMessage(body []byte, ip string) (methods []string, res []ModifiedRequest, err error) {
+	type rpcRequest struct {
+		ID     json.RawMessage   `json:"id"`
+		Method string            `json:"method"`
+		Params []json.RawMessage `json:"params"`
+	}
+	if isBatch(body) {
+		var arr []rpcRequest
+		err := json.Unmarshal(body, &arr)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to parse JSON batch request: %v", err)
+		}
+		for _, t := range arr {
+			methods = append(methods, t.Method)
+			res = append(res, ModifiedRequest{
+				ID:         t.ID,
+				Path:       t.Method,
+				RemoteAddr: ip,
+				Params:     t.Params,
+			})
+		}
+	} else {
+		var t rpcRequest
+		err := json.Unmarshal(body, &t)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to parse JSON request: %v", err)
+		}
+		methods = append(methods, t.Method)
+		res = append(res, ModifiedRequest{
+			ID:         t.ID,
+			Path:       t.Method,
+			RemoteAddr: ip,
+			Params:     t.Params,
+		})
+	}
+	return methods, res, nil
+}
+
 const (
 	jsonRPCTimeout       = -32000
 	jsonRPCUnavailable   = -32601
@@ -123,16 +131,18 @@ const (
 	jsonRPCInternal      = -32603
 )
 
+type ErrResponse struct {
+	Version string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id"`
+	Error   struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
 func jsonRPCError(id json.RawMessage, jsonCode int, msg string) interface{} {
-	type errResponse struct {
-		Version string          `json:"jsonrpc"`
-		ID      json.RawMessage `json:"id"`
-		Error   struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	resp := errResponse{
+
+	resp := ErrResponse{
 		Version: "2.0",
 		ID:      id,
 	}
@@ -187,8 +197,13 @@ func (t *myTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	ctx = gotils.With(ctx, "remoteIp", ip)
 	ctx = gotils.With(ctx, "methods", methods)
-	if blockResponse := t.block(ctx, parsedRequests); blockResponse != nil {
-		return blockResponse, nil
+	errorCode, resp := t.block(ctx, parsedRequests)
+	if resp != nil {
+		resp, err := jsonRPCResponse(errorCode, resp)
+		if err != nil {
+			gotils.L(ctx).Error().Printf("Failed to construct a response: %v", err)
+		}
+		return resp, nil
 	}
 
 	gotils.L(ctx).Info().Print("Forwarding request")
@@ -197,53 +212,33 @@ func (t *myTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 // block returns a response only if the request should be blocked, otherwise it returns nil if allowed.
-func (t *myTransport) block(ctx context.Context, parsedRequests []ModifiedRequest) *http.Response {
+func (t *myTransport) block(ctx context.Context, parsedRequests []ModifiedRequest) (int, interface{}) {
 	var union *blockRange
 	for _, parsedRequest := range parsedRequests {
 		ctx = gotils.With(ctx, "ip", parsedRequest.RemoteAddr)
 		if allowed, added := t.AllowVisitor(parsedRequest); !allowed {
 			gotils.L(ctx).Info().Print("Request blocked: Rate limited")
-			resp, err := jsonRPCResponse(http.StatusTooManyRequests, jsonRPCLimit(parsedRequest.ID))
-			if err != nil {
-				gotils.L(ctx).Error().Printf("Failed to construct rate-limit response: %v", err)
-			}
-			return resp
+			return http.StatusTooManyRequests, jsonRPCLimit(parsedRequest.ID)
 		} else if added {
 			gotils.L(ctx).Info().Printf("Added new visitor, ip: %v", parsedRequest.RemoteAddr)
 		}
 
 		if !t.MatchAnyRule(parsedRequest.Path) {
 			gotils.L(ctx).Info().Print("Request blocked: Method not allowed")
-			resp, err := jsonRPCResponse(http.StatusMethodNotAllowed, jsonRPCUnauthorized(parsedRequest.ID, parsedRequest.Path))
-			if err != nil {
-				gotils.L(ctx).Error().Printf("Failed to construct not-allowed response: %v", err)
-			}
-			return resp
+			return http.StatusMethodNotAllowed, jsonRPCUnauthorized(parsedRequest.ID, parsedRequest.Path)
 		}
 		if t.blockRangeLimit > 0 && parsedRequest.Path == "eth_getLogs" {
 			r, invalid, err := t.parseRange(ctx, parsedRequest)
 			if err != nil {
-				resp, err := jsonRPCResponse(http.StatusInternalServerError, jsonRPCError(parsedRequest.ID, jsonRPCInternal, err.Error()))
-				if err != nil {
-					gotils.L(ctx).Error().Printf("Failed to construct internal error response: %v", err)
-				}
-				return resp
+				return http.StatusInternalServerError, jsonRPCError(parsedRequest.ID, jsonRPCInternal, err.Error())
 			} else if invalid != nil {
 				gotils.L(ctx).Info().Printf("Request blocked: Invalid params: %v", invalid)
-				resp, err := jsonRPCResponse(http.StatusBadRequest, jsonRPCError(parsedRequest.ID, jsonRPCInvalidParams, invalid.Error()))
-				if err != nil {
-					gotils.L(ctx).Error().Printf("Failed to construct invalid params response: %v", err)
-				}
-				return resp
+				return http.StatusBadRequest, jsonRPCError(parsedRequest.ID, jsonRPCInvalidParams, invalid.Error())
 			}
 			if r != nil {
 				if l := r.len(); l > t.blockRangeLimit {
 					gotils.L(ctx).Info().Println("Request blocked: Exceeds block range limit, range:", l, "limit:", t.blockRangeLimit)
-					resp, err := jsonRPCResponse(http.StatusBadRequest, jsonRPCBlockRangeLimit(parsedRequest.ID, l, t.blockRangeLimit))
-					if err != nil {
-						gotils.L(ctx).Error().Printf("Failed to construct block range limit response: %v", err)
-					}
-					return resp
+					return http.StatusBadRequest, jsonRPCBlockRangeLimit(parsedRequest.ID, l, t.blockRangeLimit)
 				}
 				if union == nil {
 					union = r
@@ -251,17 +246,13 @@ func (t *myTransport) block(ctx context.Context, parsedRequests []ModifiedReques
 					union.extend(r)
 					if l := union.len(); l > t.blockRangeLimit {
 						gotils.L(ctx).Info().Println("Request blocked: Exceeds block range limit, range:", l, "limit:", t.blockRangeLimit)
-						resp, err := jsonRPCResponse(http.StatusBadRequest, jsonRPCBlockRangeLimit(parsedRequest.ID, l, t.blockRangeLimit))
-						if err != nil {
-							gotils.L(ctx).Error().Printf("Failed to construct block range limit response: %v", err)
-						}
-						return resp
+						return http.StatusBadRequest, jsonRPCBlockRangeLimit(parsedRequest.ID, l, t.blockRangeLimit)
 					}
 				}
 			}
 		}
 	}
-	return nil
+	return 0, nil
 }
 
 type blockRange struct{ start, end uint64 }

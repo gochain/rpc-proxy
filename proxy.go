@@ -21,8 +21,9 @@ import (
 )
 
 type Server struct {
-	target *url.URL
-	proxy  *httputil.ReverseProxy
+	target  *url.URL
+	proxy   *httputil.ReverseProxy
+	wsProxy *WebsocketProxy
 	myTransport
 	homepage []byte
 }
@@ -32,8 +33,11 @@ func (cfg *ConfigData) NewServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	s := &Server{target: url, proxy: httputil.NewSingleHostReverseProxy(url)}
+	wsurl, err := url.Parse(cfg.WSURL)
+	if err != nil {
+		return nil, err
+	}
+	s := &Server{target: url, proxy: httputil.NewSingleHostReverseProxy(url), wsProxy: NewProxy(wsurl)}
 	s.myTransport.blockRangeLimit = cfg.BlockRangeLimit
 	s.myTransport.url = cfg.URL
 	s.matcher, err = newMatcher(cfg.Allow)
@@ -46,6 +50,7 @@ func (cfg *ConfigData) NewServer() (*Server, error) {
 		s.noLimitIPs[ip] = struct{}{}
 	}
 	s.proxy.Transport = &s.myTransport
+	s.wsProxy.Transport = &s.myTransport
 
 	// Generate static home page.
 	id := json.RawMessage([]byte(`"ID"`))
@@ -86,6 +91,11 @@ func (p *Server) HomePage(w http.ResponseWriter, r *http.Request) {
 func (p *Server) RPCProxy(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-rpc-proxy", "rpc-proxy")
 	p.proxy.ServeHTTP(w, r)
+}
+
+func (p *Server) WSProxy(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("X-rpc-proxy", "rpc-proxy")
+	p.wsProxy.ServeHTTP(w, r)
 }
 
 func (p *Server) Example(w http.ResponseWriter, r *http.Request) {

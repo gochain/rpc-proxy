@@ -23,6 +23,7 @@ var requestsPerMinuteLimit int
 type ConfigData struct {
 	Port            string   `toml:",omitempty"`
 	URL             string   `toml:",omitempty"`
+	WSURL           string   `toml:",omitempty"`
 	Allow           []string `toml:",omitempty"`
 	RPM             int      `toml:",omitempty"`
 	NoLimit         []string `toml:",omitempty"`
@@ -37,6 +38,7 @@ func main() {
 	var configPath string
 	var port string
 	var redirecturl string
+	var redirectWSUrl string
 	var allowedPaths string
 	var noLimitIPs string
 	var blockRangeLimit uint64
@@ -63,6 +65,12 @@ func main() {
 			Value:       "http://127.0.0.1:8040",
 			Usage:       "redirect url",
 			Destination: &redirecturl,
+		},
+		&cli.StringFlag{
+			Name:        "wsurl, w",
+			Value:       "ws://127.0.0.1:8041",
+			Usage:       "redirect websocket url",
+			Destination: &redirectWSUrl,
 		},
 		&cli.StringFlag{
 			Name:        "allow, a",
@@ -111,6 +119,12 @@ func main() {
 			}
 			cfg.URL = redirecturl
 		}
+		if redirectWSUrl != "" {
+			if cfg.WSURL != "" {
+				return errors.New("ws url set in two places")
+			}
+			cfg.WSURL = redirectWSUrl
+		}
 		if requestsPerMinuteLimit != 0 {
 			if cfg.RPM != 0 {
 				return errors.New("rpm set in two places")
@@ -150,7 +164,7 @@ func (cfg *ConfigData) run(ctx context.Context) error {
 	sort.Strings(cfg.Allow)
 	sort.Strings(cfg.NoLimit)
 
-	gotils.L(ctx).Info().Println("Server starting, port:", cfg.Port, "redirectURL:", cfg.URL,
+	gotils.L(ctx).Info().Println("Server starting, port:", cfg.Port, "redirectURL:", cfg.URL, "redirectWSURL:", cfg.WSURL,
 		"rpmLimit:", cfg.RPM, "exempt:", cfg.NoLimit, "allowed:", cfg.Allow)
 
 	// Create proxy server.
@@ -189,5 +203,6 @@ func (cfg *ConfigData) run(ctx context.Context) error {
 		w.WriteHeader(http.StatusOK)
 	})
 	r.HandleFunc("/*", server.RPCProxy)
+	r.HandleFunc("/ws", server.WSProxy)
 	return http.ListenAndServe(":"+cfg.Port, r)
 }

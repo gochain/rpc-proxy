@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -177,7 +178,7 @@ func (w *WebsocketProxy) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 
 	errClient := make(chan error, 1)
 	errBackend := make(chan error, 1)
-	replicateWebsocketConn := func(ip string, limit bool, dst, src *websocket.Conn, errc chan error) {
+	replicateWebsocketConn := func(ctx context.Context, ip string, limit bool, dst, src *websocket.Conn, errc chan error) {
 		for {
 			msgType, msg, err := src.ReadMessage()
 			if err != nil {
@@ -223,8 +224,8 @@ func (w *WebsocketProxy) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		}
 	}
 	ip := getIP(req)
-	go replicateWebsocketConn(ip, true, connBackend, connPub, errBackend)
-	go replicateWebsocketConn(ip, false, connPub, connBackend, errClient)
+	go replicateWebsocketConn(ctx, ip, true, connBackend, connPub, errBackend)
+	go replicateWebsocketConn(ctx, ip, false, connPub, connBackend, errClient)
 
 	var message string
 	select {

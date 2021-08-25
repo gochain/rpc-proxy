@@ -21,6 +21,10 @@ var (
 	DefaultUpgrader = &websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
+		// Resolve cross-domain problems
+		CheckOrigin: func(r *http.Request) bool {
+			return true
+		},
 	}
 
 	// DefaultDialer is a dialer with all fields set to the default zero values.
@@ -182,6 +186,7 @@ func (w *WebsocketProxy) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		for {
 			msgType, msg, err := src.ReadMessage()
 			if err != nil {
+				gotils.L(ctx).Error().Printf("websocketproxy: ReadMessage %s", err)
 				m := websocket.FormatCloseMessage(websocket.CloseNormalClosure, fmt.Sprintf("%v", err))
 				if e, ok := err.(*websocket.CloseError); ok {
 					if e.Code != websocket.CloseNoStatusReceived {
@@ -192,7 +197,7 @@ func (w *WebsocketProxy) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 				dst.WriteMessage(websocket.CloseMessage, m)
 				break
 			}
-			if limit {
+			if limit && len(msg) > 0 {
 				methods, res, err := parseMessage(msg, ip)
 				if err != nil {
 					errc <- err

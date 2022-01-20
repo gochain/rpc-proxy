@@ -189,7 +189,7 @@ func (w *WebsocketProxy) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 				gotils.L(ctx).Error().Printf("websocketproxy: ReadMessage %s", err)
 				m := websocket.FormatCloseMessage(websocket.CloseNormalClosure, fmt.Sprintf("%v", err))
 				if e, ok := err.(*websocket.CloseError); ok {
-					if e.Code != websocket.CloseNoStatusReceived {
+					if e.Code != websocket.CloseNoStatusReceived && e.Code != websocket.CloseAbnormalClosure {
 						m = websocket.FormatCloseMessage(e.Code, e.Text)
 					}
 				}

@@ -221,6 +221,13 @@ func (w *WebsocketProxy) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 					}
 				}
 			}
+			if len(msg) == 0 { //workaround for empty message and a wrong type
+				if limit {
+					msgType = websocket.PingMessage
+				} else {
+					msgType = websocket.PongMessage
+				}
+			}
 			err = dst.WriteMessage(msgType, msg)
 			if err != nil {
 				errc <- err

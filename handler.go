@@ -206,7 +206,7 @@ func (t *myTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return resp, nil
 	}
 
-	gotils.L(ctx).Info().Print("Forwarding request")
+	// gotils.L(ctx).Info().Print("Forwarding request")
 	req.Host = req.RemoteAddr //workaround for CloudFlare
 	return http.DefaultTransport.RoundTrip(req)
 }
@@ -224,7 +224,7 @@ func (t *myTransport) block(ctx context.Context, parsedRequests []ModifiedReques
 		}
 
 		if !t.MatchAnyRule(parsedRequest.Path) {
-			gotils.L(ctx).Info().Print("Request blocked: Method not allowed")
+			// gotils.L(ctx).Info().Print("Request blocked: Method not allowed")
 			return http.StatusMethodNotAllowed, jsonRPCUnauthorized(parsedRequest.ID, parsedRequest.Path)
 		}
 		if t.blockRangeLimit > 0 && parsedRequest.Path == "eth_getLogs" {

@@ -206,7 +206,7 @@ func (t *myTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return resp, nil
 	}
 
-	gotils.L(ctx).Debug().Print("Forwarding request")
+	// gotils.L(ctx).Debug().Print("Forwarding request")
 	req.Host = req.RemoteAddr //workaround for CloudFlare
 	return http.DefaultTransport.RoundTrip(req)
 }
@@ -216,15 +216,15 @@ func (t *myTransport) block(ctx context.Context, parsedRequests []ModifiedReques
 	var union *blockRange
 	for _, parsedRequest := range parsedRequests {
 		ctx = gotils.With(ctx, "ip", parsedRequest.RemoteAddr)
-		if allowed, added := t.AllowVisitor(parsedRequest); !allowed {
+		if allowed, _ := t.AllowVisitor(parsedRequest); !allowed {
 			gotils.L(ctx).Info().Print("Request blocked: Rate limited")
 			return http.StatusTooManyRequests, jsonRPCLimit(parsedRequest.ID)
-		} else if added {
-			gotils.L(ctx).Debug().Printf("Added new visitor, ip: %v", parsedRequest.RemoteAddr)
-		}
+		} //else if added {
+		// gotils.L(ctx).Debug().Printf("Added new visitor, ip: %v", parsedRequest.RemoteAddr)
+		// }
 
 		if !t.MatchAnyRule(parsedRequest.Path) {
-			gotils.L(ctx).Debug().Print("Request blocked: Method not allowed")
+			// gotils.L(ctx).Debug().Print("Request blocked: Method not allowed")
 			return http.StatusMethodNotAllowed, jsonRPCUnauthorized(parsedRequest.ID, parsedRequest.Path)
 		}
 		if t.blockRangeLimit > 0 && parsedRequest.Path == "eth_getLogs" {

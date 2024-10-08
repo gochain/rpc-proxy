@@ -24,9 +24,24 @@ jobs:
     - name: Test
       run: go test -v ./...
 
+  bump:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bump version
+        run: |
+          git config --global user.email "github+actions@gmail.com"
+          git config --global user.name "Actions"
+          git fetch --tags
+          wget -O - https://raw.githubusercontent.com/treeder/bump/master/gitbump.sh | bash
+
   # Push image to GitHub Packages.
   push:
-    needs: build
+    needs: bump
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
 
@@ -51,7 +66,9 @@ jobs:
           IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
 
           # Strip git ref prefix from version
-          VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/\(.*\),\1,')
+          # VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/\(.*\),\1,')
+          VERSION=$(git tag --sort=-v:refname --list "v[0-9]*" | head -n 1)
+          echo "Image version tag: $VERSION"
 
           # Strip "v" prefix from tag name
           [[ "${{ github.ref }}" == "refs/tags/"* ]] && VERSION=$(echo $VERSION | sed -e 's/^v//')
@@ -64,3 +81,7 @@ jobs:
 
           docker tag rpc-proxy $IMAGE_ID:$VERSION
           docker push $IMAGE_ID:$VERSION
+
+          docker tag rpc-proxy $IMAGE_ID:latest
+          docker push $IMAGE_ID:latest
+          

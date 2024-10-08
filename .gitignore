@@ -2,3 +2,4 @@ rpc-proxy
 vendor/
 /tmp
 .idea
+/web3

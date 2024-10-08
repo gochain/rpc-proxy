@@ -45,6 +45,12 @@ GLOBAL OPTIONS:
 
 ## Docker
 
+Run our Docker image:
+
+```sh
+docker run ghcr.io/gochain/rpc-proxy/rpc-proxy:latest
+```
+
 Build Docker image:
 
 ```sh

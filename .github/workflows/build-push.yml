@@ -67,6 +67,7 @@ jobs:
 
           # Strip git ref prefix from version
           # VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/\(.*\),\1,')
+          git fetch --tags # checkout action does not get these
           VERSION=$(git tag --sort=-v:refname --list "v[0-9]*" | head -n 1)
           echo "Image version tag: $VERSION"
 

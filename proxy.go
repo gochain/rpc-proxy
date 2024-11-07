@@ -145,7 +145,7 @@ func (p *Server) Example(w http.ResponseWriter, r *http.Request) {
 	case "clique_getVotersAtHash":
 		do(hexHash)
 	case "eth_blockNumber":
-		do(hexNumOrLatest)
+		do()
 	case "eth_chainId":
 		do()
 	case "eth_gasPrice":

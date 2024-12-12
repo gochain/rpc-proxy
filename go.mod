@@ -14,9 +14,9 @@ require (
 	github.com/treeder/gcputils v0.1.8
 	github.com/treeder/gotils/v2 v2.1.17
 	github.com/urfave/cli/v2 v2.27.4
-	golang.org/x/crypto v0.28.0 // indirect
+	golang.org/x/crypto v0.31.0 // indirect
 	golang.org/x/net v0.30.0 // indirect
-	golang.org/x/sys v0.26.0 // indirect
+	golang.org/x/sys v0.28.0 // indirect
 	golang.org/x/time v0.7.0
 	google.golang.org/genproto v0.0.0-20241007155032-5fefd90f89a9 // indirect
 )
@@ -30,6 +30,7 @@ require (
 	cloud.google.com/go/logging v1.11.0 // indirect
 	cloud.google.com/go/longrunning v0.6.1 // indirect
 	github.com/allegro/bigcache v1.2.1 // indirect
+	github.com/btcsuite/btcd v0.21.0-beta // indirect
 	github.com/cespare/xxhash v1.1.0 // indirect
 	github.com/deckarep/golang-set v1.8.0 // indirect
 	github.com/edsrzf/mmap-go v1.1.0 // indirect
@@ -52,8 +53,8 @@ require (
 	go.opentelemetry.io/otel/metric v1.30.0 // indirect
 	go.opentelemetry.io/otel/trace v1.30.0 // indirect
 	golang.org/x/oauth2 v0.23.0 // indirect
-	golang.org/x/sync v0.8.0 // indirect
-	golang.org/x/text v0.19.0 // indirect
+	golang.org/x/sync v0.10.0 // indirect
+	golang.org/x/text v0.21.0 // indirect
 	google.golang.org/api v0.199.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20241007155032-5fefd90f89a9 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20241007155032-5fefd90f89a9 // indirect

@@ -134,7 +134,7 @@ func (w *WebsocketProxy) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		w.Director(req, requestHeader)
 	}
 
-	// Connect to the backend URL, also pass the headers we get from the requst
+	// Connect to the backend URL, also pass the headers we get from the request
 	// together with the Forwarded headers we prepared above.
 	// TODO: support multiplexing on the same backend connection instead of
 	// opening a new TCP connection time for each request. This should be

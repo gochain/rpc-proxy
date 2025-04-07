@@ -1,6 +1,9 @@
 module github.com/gochain-io/rpc-proxy
 
-go 1.23
+go 1.23.0
+
+toolchain go1.24.1
+
 require (
 	cloud.google.com/go v0.117.0 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.6 // indirect
